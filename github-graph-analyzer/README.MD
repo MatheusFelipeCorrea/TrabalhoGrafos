@@ -86,7 +86,7 @@ carol,dave,review_pr,4,2026-01-16T09:11:00Z,87
 - `open_issue_commented` — abriu issue que recebeu comentário (peso 3)
 - `review_pr` — fez review/aprovou PR de outro (peso 4)
 - `merge_pr` — fez merge de PR de outro usuário (peso 5)
-- `close_issue` — fechou issue de outro usuário (peso variável, definir)
+- `close_issue` — fechou issue de outro usuário (peso 3; usado no G2; implementado em `issue_miner.py`)
 
 > ⚠️ Auto-interações (mesmo `src_login` e `dst_login`) **devem ser descartadas** (grafos sem laços).
 
