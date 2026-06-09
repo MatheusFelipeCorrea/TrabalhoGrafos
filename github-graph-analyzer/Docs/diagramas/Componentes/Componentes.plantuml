@@ -1,0 +1,107 @@
+@startuml Componentes
+skinparam componentStyle rectangle
+
+title Diagrama de Componentes — Camadas do Sistema
+
+package "Frontend (F5.5)" #E1F5FE {
+  [GrafoGen SPA\nReact + Vite] as SPA
+  [Vis-Network Canvas] as Vis
+  [Zustand Stores] as Store
+  [GEXF Parser] as Parser
+  [API Client] as ApiClient
+}
+
+package "API Local" #B3E5FC {
+  [Express Server\nserver/index.js] as Express
+}
+
+package "App / Integração (F5)" #F3E5F5 {
+  [main.py CLI\n--mine --build --analyze] as CLI
+  [api_demo.py] as Demo
+}
+
+package "F1 — Mining" #BBDEFB {
+  [github_client] as GHClient
+  [issue_miner] as IssueM
+  [pr_miner] as PRM
+  [data_exporter] as Exporter
+}
+
+package "F2 — Graph" #C8E6C9 {
+  [abstract_graph] as Abstract
+  [adjacency_list_graph] as ListG
+  [adjacency_matrix_graph] as MatrixG
+  [gephi_exporter] as GexfExp
+}
+
+package "F3 — Builders" #FFF59D {
+  [base_builder] as BaseB
+  [graph1..graph4 builders] as Builders
+  [user_registry] as Registry
+}
+
+package "F4 — Analysis" #FFCDD2 {
+  [centrality] as Cent
+  [structure] as Struct
+  [community] as Comm
+}
+
+database "Arquivos locais" as FS {
+  folder "data/raw/\nusers.csv\ninteractions.csv" as Raw
+  folder "output/graphs/\n*.gexf" as Gexf
+  folder "output/reports/\n*.csv / *.json" as Reports
+}
+
+cloud "GitHub REST API" as GitHub
+
+SPA --> Vis
+SPA --> Store
+SPA --> Parser
+SPA --> ApiClient
+ApiClient --> Express : HTTP /api/*
+
+Express --> CLI : spawn python
+Express --> FS : leitura
+
+CLI --> GHClient
+CLI --> IssueM
+CLI --> PRM
+CLI --> Exporter
+CLI --> Builders
+CLI --> Cent
+CLI --> Struct
+CLI --> Comm
+
+Demo --> Abstract
+
+GHClient --> GitHub
+IssueM --> GHClient
+PRM --> GHClient
+Exporter --> Raw
+
+BaseB --> Abstract
+BaseB --> Registry
+Builders --> BaseB
+Builders --> GexfExp
+GexfExp --> Gexf
+
+Cent --> Abstract
+Struct --> Abstract
+Comm --> Abstract
+Cent --> Reports
+Struct --> Reports
+Comm --> Reports
+
+Express --> Gexf : serve GEXF
+Express --> Reports : serve CSV/JSON
+Parser ..> Gexf : parse XML
+
+note right of SPA
+  Matheus Felipe
+end note
+
+note bottom of CLI
+  Diogo Meireles — F5
+end note
+
+@enduml

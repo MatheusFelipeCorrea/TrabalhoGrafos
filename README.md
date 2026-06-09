@@ -2,10 +2,6 @@
 
 > Ferramenta de mineração e análise de redes de colaboração em repositórios open-source do GitHub, modelada com Teoria dos Grafos.
 
-[](https://www.python.org/)
-[](#)
-[](#)
-
 ---
 
 ## 🎓 Sobre o Trabalho
@@ -57,17 +53,18 @@ Cada **usuário** é um **vértice**. Cada **interação** é uma **aresta direc
 | Linguagem | **Python 3.10+** | Permitida pelo enunciado, ecossistema rico para mineração |
 | Mineração GitHub | **PyGithub** | Cobre 100% dos endpoints REST necessários (issues, PRs, reviews, eventos), com paginação automática e tratamento nativo de rate-limit |
 | Manipulação de dados | **pandas**, **tqdm** | Persistência em CSV e barras de progresso |
-| Cálculos numéricos | **numpy** | Suporte a operações de matriz nas análises |
+| Cálculos numéricos | **numpy** | Matriz de adjacência e operações numéricas |
 | Configuração | **python-dotenv** | Carregamento de token GitHub via `.env` |
 | Testes | **pytest** | Padrão da comunidade Python |
 | Relatório | **LaTeX (template SBC)** | Exigência do enunciado |
-| Visualização | **Gephi** (externo) | Exportamos `.gexf` gerado manualmente |
+| Visualização (desktop) | **Gephi** (externo) | Abre `.gexf` exportado manualmente |
+| Visualização (web) | **GrafoGen** — React + Vis-Network | SPA em `frontend-grafogen/` |
 
 > ⚠️ **IMPORTANTE:** Conforme o enunciado, **NÃO usamos** bibliotecas prontas de grafos (como `networkx`, `igraph`, `graph-tool`). A estrutura de grafo (matriz e lista de adjacência), todos os algoritmos da API e os algoritmos de análise (centralidade, comunidades, etc.) são **implementados do zero**.
 
 ---
 
-## 🏛️ Arquitetura em 4 Camadas
+## 🏛️ Arquitetura
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -79,22 +76,34 @@ Cada **usuário** é um **vértice**. Cada **interação** é uma **aresta direc
                    │
                    ▼
           [APP] Pipeline + Demo da API
+                   │
+                   ▼
+          [F5] GRAFOGEN — Visualizador web interativo
 ```
 
-A estrutura completa de pastas e os contratos entre as camadas estão documentados em [`src/README.md`](./src/README.md).
+A estrutura completa de pastas, contratos entre camadas e documentação técnica por frente estão em:
+
+- [`github-graph-analyzer/README.MD`](./github-graph-analyzer/README.MD) — contratos e `src/`
+- [`github-graph-analyzer/Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md`](./github-graph-analyzer/Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md) — **F1–F5.5 em um documento** (leitura em grupo)
+- [`github-graph-analyzer/Docs/README.md`](./github-graph-analyzer/Docs/README.md) — índice da pasta Docs
 
 ---
 
 ## 👥 Equipe e Divisão de Responsabilidades
 
-| Membro | Frente Principal | Apoio Secundário |
-|--------|------------------|------------------|
-| **[Nome A]** | 🟦 F1 — Mining (coleta da API) | F3 — Builders |
-| **[Nome B]** | 🟩 F2 — Graph Structures (Matrix + List + API + Gephi) | App Demo |
-| **[Nome C]** | 🟨 F3 — Builders dos 4 grafos + UserRegistry | F1 — Mining |
-| **[Nome D]** | 🟥 F4 — Análises e métricas + Relatório SBC | Vídeo / apresentação |
+| Frente | Responsável | Descrição |
+|--------|-------------|-----------|
+| 🟦 **F1 — Mining** | **Arthur Henrique** | Coleta via GitHub API, CSVs em `data/raw/` |
+| 🟩 **F2 — Graph Structures** | **Matheus Felipe** | `AbstractGraph`, matriz/lista, GEXF, `api_demo` |
+| 🟨 **F3 — Builders** | **Alice Shikida** | G1–G4, `UserRegistry`, exportação `.gexf` |
+| 🟥 **F4 — Analysis** | **Diogo Meireles** | Centralidade, estrutura, comunidades |
+| 🟪 **F5 — Integração** | **Diogo Meireles** | `main.py` CLI, pipeline `--all` |
+| 🟦 **F5.5 — Frontend** | **Matheus Felipe** | GrafoGen (`frontend-grafogen/`) |
+| 📄 **F6 — Relatório SBC** | **Alice Shikida**, **Matheus Felipe** | LaTeX, vídeo, entrega final |
 
-> Todos os membros são responsáveis por: **testes da própria frente**, **commits regulares no Git**, **revisão dos PRs dos colegas** e **contribuição no relatório**.
+> Todos os membros são responsáveis por: **testes da própria frente (meta ≥ 98% de cobertura)**, **commits regulares no Git**, **revisão dos PRs dos colegas** e **contribuição no relatório**.
+
+Diagramas UML: [`github-graph-analyzer/Docs/diagramas/`](./github-graph-analyzer/Docs/diagramas/)
 
 ---
 
@@ -102,13 +111,14 @@ A estrutura completa de pastas e os contratos entre as camadas estão documentad
 
 ### 1. Pré-requisitos
 - Python 3.10+
+- Node.js 18+ (apenas para o GrafoGen)
 - Conta GitHub com [Personal Access Token](https://github.com/settings/tokens) (escopo `public_repo`)
 
-### 2. Instalação
+### 2. Instalação (backend Python)
 
 ```bash
 git clone <url-do-repo>
-cd github-graph-analyzer
+cd TrabalhoGrafos/github-graph-analyzer
 python -m venv .venv
 source .venv/bin/activate            # Linux/Mac
 # .venv\Scripts\activate              # Windows
@@ -138,32 +148,59 @@ python -m src.app.main --analyze
 python -m src.app.main --all
 ```
 
+> Se os CSVs e GEXF já existem no repositório, pule `--mine` e use apenas `--build` / `--analyze` conforme necessário.
+
 ### 5. Demonstração da API de grafos
 
 ```bash
 python -m src.app.api_demo
 ```
 
-### 6. Testes
+### 6. Visualizador web (GrafoGen)
 
 ```bash
-pytest tests/ -v
+cd ../frontend-grafogen
+npm install
+npm run dev
+```
+
+- Frontend: http://localhost:5173
+- API local: http://localhost:3001
+
+Documentação completa: [`github-graph-analyzer/Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md`](./github-graph-analyzer/Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md) (Parte 5 — GrafoGen)
+
+### 7. Testes
+
+**Backend (Python):**
+
+```bash
+cd github-graph-analyzer
+pytest tests/ -v          # exige ≥98% em src/ (pytest.ini)
+pytest --cov=src tests/   # relatório detalhado
+```
+
+**Frontend (GrafoGen — utilitários):**
+
+```bash
+cd frontend-grafogen
+npm test
+npm run test:coverage
 ```
 
 ---
 
 ## 📦 Entregáveis
 
-- [x] **Etapa 1** — Modelagem e planejamento (este README + relatório inicial)
-- [ ] **Etapa 2** — Protótipo funcional com testes
-- [ ] **Etapa 3** — Análises completas + relatório SBC + vídeo
+- [x] **Etapa 1** — Modelagem e planejamento (README + relatório inicial)
+- [x] **Etapa 2** — Protótipo funcional com testes (F1–F4 implementadas, GrafoGen operacional)
+- [ ] **Etapa 3** — Relatório SBC final + vídeo de apresentação
 
 ---
 
 ## 📑 Relatório
 
-O relatório técnico em LaTeX (template oficial da SBC) está em [`report/main.tex`](./report/main.tex).  
-A versão compilada em PDF: [`report/main.pdf`](./report/main.pdf).
+O relatório técnico em LaTeX (template oficial da SBC) será entregue na **Etapa 3** (F6 — Relatório).  
+Enunciado: [`github-graph-analyzer/Docs/Orientação Trabalho/tp-es.pdf`](./github-graph-analyzer/Docs/Orientação%20Trabalho/tp-es.pdf).
 
 ---
 

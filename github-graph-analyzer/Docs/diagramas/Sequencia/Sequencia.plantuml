@@ -1,0 +1,77 @@
+@startuml Sequencia
+autonumber
+skinparam responseMessageBelowArrow true
+
+title Diagrama de Sequência — Pipeline via GrafoGen
+
+actor "Pesquisador" as User
+participant "GrafoGen\n(React)" as UI
+participant "Express API\n:3001" as API
+participant "main.py\n(Python)" as Py
+participant "F1 Mining" as F1
+participant "F3 Builders" as F3
+participant "F4 Analysis" as F4
+participant "GitHub API" as GH
+database "data/raw/" as Raw
+database "output/graphs/" as Gexf
+database "output/reports/" as Rep
+
+== Consultar status inicial ==
+
+User -> UI : Abre Home
+UI -> API : GET /api/status
+API -> Raw : verifica CSVs
+API -> Gexf : verifica .gexf
+API -> Rep : verifica relatórios
+API --> UI : stage1/2/3Complete,\ncontagens
+
+== Etapa 1 — Mineração (opcional) ==
+
+User -> UI : Executar Mineração
+UI -> API : POST /api/pipeline/mine
+API -> Py : spawn --mine
+Py -> F1 : run_mining()
+F1 -> GH : issues, PRs, reviews...
+GH --> F1 : JSON paginado
+F1 --> Py : Interaction[]
+Py -> Raw : users.csv\ninteractions.csv\nevents.csv
+Py --> API : exit 0
+API --> UI : logs via polling /status
+
+== Etapa 2 — Construção dos grafos ==
+
+User -> UI : Executar Build
+UI -> API : POST /api/pipeline/build
+API -> Py : spawn --build
+Py -> F3 : Graph1..4Builder.build()
+F3 -> Raw : lê CSVs
+F3 -> Gexf : export GEXF 1.3
+Py --> API : exit 0
+API --> UI : cards G1–G4 disponíveis
+
+== Etapa 3 — Análise ==
+
+User -> UI : Executar Análise
+UI -> API : POST /api/pipeline/analyze
+API -> Py : spawn --analyze
+Py -> F3 : rebuild grafos em memória
+Py -> F4 : centralidade,\nestrutura, Louvain
+F4 -> Rep : centrality.csv\nstructure.json\ncommunities.csv
+Py --> API : exit 0
+
+== Visualização ==
+
+User -> UI : Clica card G1
+UI -> API : GET /api/graphs/G1
+API -> Gexf : lê graph1_comments.gexf
+API --> UI : XML GEXF
+UI -> UI : gexfParser → Vis-Network
+
+opt Métricas disponíveis
+  UI -> API : GET /api/reports/centrality.csv
+  API -> Rep : leitura
+  API --> UI : CSV
+  UI -> UI : MetricsPanel top 10
+end
+
+@enduml

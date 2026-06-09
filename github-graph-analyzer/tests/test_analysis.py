@@ -8,8 +8,10 @@ from src.analysis.centrality import (
     degree_centrality,
     pagerank,
 )
-from src.analysis.community import bridging_ties, detect_communities, modularity
-from src.analysis.structure import clustering_coefficient, degree_assortativity, density
+from src.analysis.centrality import _dijkstra_brandes, _shortest_distances
+from src.analysis.community import _local_moving, bridging_ties, detect_communities, modularity
+from src.analysis.structure import _pearson_correlation, clustering_coefficient, degree_assortativity, density
+from src.graph.abstract_graph import AbstractGraph
 from src.graph.adjacency_list_graph import AdjacencyListGraph
 from src.graph.adjacency_matrix_graph import AdjacencyMatrixGraph
 
@@ -158,6 +160,27 @@ class TestBetweennessCentrality:
         for vertex in range(3):
             assert bc[vertex] == pytest.approx(bc[0])
 
+    def test_weighted_diamond_with_equal_paths(self, factory) -> None:
+        graph = factory(4)
+        for source, target, weight in ((0, 1, 1.0), (0, 2, 1.0), (1, 3, 1.0), (2, 3, 1.0)):
+            graph.add_edge(source, target)
+            graph.set_edge_weight(source, target, weight)
+        bc = betweenness_centrality(graph)
+        assert bc[1] > 0.0
+        assert bc[2] > 0.0
+
+    def test_dijkstra_brandes_ignora_entradas_obsoletas_no_heap(self, factory) -> None:
+        graph = factory(3)
+        graph.add_edge(0, 1)
+        graph.set_edge_weight(0, 1, 3.0)
+        graph.add_edge(0, 2)
+        graph.set_edge_weight(0, 2, 1.0)
+        graph.add_edge(2, 1)
+        graph.set_edge_weight(2, 1, 1.0)
+        stack, _, sigma = _dijkstra_brandes(graph, 0)
+        assert 1 in stack
+        assert sigma[1] == pytest.approx(1.0)
+
 
 # ---------------------------------------------------------------------------
 # Centralidade de Proximidade
@@ -195,6 +218,28 @@ class TestClosenessCentrality:
         assert cc[0] > 0.0
         assert cc[1] > cc[0]  # menos alcançáveis mas distância média menor
         assert cc[3] == pytest.approx(0.0)
+
+    def test_weighted_closeness(self, factory) -> None:
+        graph = build_weighted_triangle(factory)
+        cc = closeness_centrality(graph)
+        assert all(value > 0.0 for value in cc.values())
+
+    def test_weighted_shortest_distances(self, factory) -> None:
+        graph = build_weighted_triangle(factory)
+        distances = _shortest_distances(graph, 0, weighted=True)
+        assert distances[1] == pytest.approx(2.0)
+        assert distances[2] == pytest.approx(6.0)
+
+    def test_weighted_shortest_distances_skips_stale_heap_entries(self, factory) -> None:
+        graph = factory(3)
+        graph.add_edge(0, 1)
+        graph.set_edge_weight(0, 1, 3.0)
+        graph.add_edge(0, 2)
+        graph.set_edge_weight(0, 2, 1.0)
+        graph.add_edge(2, 1)
+        graph.set_edge_weight(2, 1, 1.0)
+        distances = _shortest_distances(graph, 0, weighted=True)
+        assert distances[1] == pytest.approx(2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -429,6 +474,29 @@ class TestDetectCommunities:
 # ---------------------------------------------------------------------------
 # Arestas de Ponte (Bridging Ties)
 # ---------------------------------------------------------------------------
+
+
+def test_modularity_without_edges_returns_zero() -> None:
+    graph = AdjacencyListGraph(3)
+    assert modularity(graph, {0: 0, 1: 0, 2: 0}) == pytest.approx(0.0)
+
+
+def test_local_moving_with_zero_total_weight_returns_identity() -> None:
+    assert _local_moving([], [], 0.0) == []
+
+
+def test_pearson_correlation_edge_cases() -> None:
+    assert _pearson_correlation([], []) == pytest.approx(0.0)
+    assert _pearson_correlation([1, 1, 1], [2, 2, 2]) == pytest.approx(0.0)
+    assert _pearson_correlation([1, 2, 3], [2, 4, 6]) == pytest.approx(1.0)
+
+
+def test_abstract_graph_iter_edges_default() -> None:
+    graph = AdjacencyListGraph(2)
+    graph.add_edge(0, 1)
+    graph.set_edge_weight(0, 1, 2.5)
+    edges = AbstractGraph.iter_edges(graph)
+    assert edges == [(0, 1, 2.5)]
 
 
 @pytest.mark.parametrize("factory", [AdjacencyMatrixGraph, AdjacencyListGraph])

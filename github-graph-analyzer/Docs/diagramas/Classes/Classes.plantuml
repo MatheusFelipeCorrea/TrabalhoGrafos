@@ -1,0 +1,144 @@
+@startuml Classes
+skinparam classAttributeIconSize 0
+skinparam linetype ortho
+
+title Diagrama de Classes — Domínio Principal
+
+package "mining (F1)" #E3F2FD {
+  class GitHubClient {
+    - _token: str
+    + get_repository(repo: str)
+    + paginate(...)
+  }
+  class IssueMiner {
+    + mine(repo) : list[Interaction]
+  }
+  class PRMiner {
+    + mine(repo) : list[Interaction]
+  }
+  class DataExporter {
+    + export_users(...)
+    + export_interactions(...)
+    + export_events(...)
+  }
+  class Interaction <<dataclass>> {
+    + src_login: str
+    + dst_login: str
+    + type: str
+    + weight: int
+    + timestamp: str
+    + source_id: int
+  }
+  class MiningEvent <<dataclass>> {
+    + event_type: str
+    + actor_login: str
+    + ...
+  }
+}
+
+package "graph (F2)" #E8F5E9 {
+  abstract class AbstractGraph {
+    # _num_vertices: int
+    # _edge_count: int
+    + get_vertex_count() : int
+    + get_edge_count() : int
+    + add_edge(u, v)
+    + remove_edge(u, v)
+    + has_edge(u, v) : bool
+    + set_edge_weight(u, v, w)
+    + get_edge_weight(u, v) : float
+    + set_vertex_label(v, label)
+    + is_connected() : bool
+    + export_to_gephi(path)
+    {abstract} + has_edge(u, v) : bool
+  }
+  class AdjacencyListGraph {
+    - _adj: dict
+  }
+  class AdjacencyMatrixGraph {
+    - _matrix: ndarray
+  }
+  class InvalidVertexError
+  class SelfLoopError
+  class EdgeNotFoundError
+}
+
+package "builder (F3)" #FFF9C4 {
+  abstract class BaseBuilder {
+    + build(csv, users) : tuple
+    # _filter_interactions(rows)
+    # _apply_interaction(...)
+  }
+  class UserRegistry {
+    + add_user(login, user_id, name)
+    + get_index(login) : int
+    + get_login(index) : str
+  }
+  class Graph1CommentsBuilder
+  class Graph2ClosuresBuilder
+  class Graph3ReviewsBuilder
+  class Graph4IntegratedBuilder
+}
+
+package "analysis (F4)" #FFEBEE {
+  class "centrality.py" as Centrality <<module>> {
+    + degree_centrality(graph)
+    + betweenness_centrality(graph)
+    + closeness_centrality(graph)
+    + pagerank(graph)
+  }
+  class "structure.py" as Structure <<module>> {
+    + density(graph)
+    + clustering_coefficient(graph)
+    + degree_assortativity(graph)
+  }
+  class "community.py" as Community <<module>> {
+    + detect_communities(graph)
+    + modularity(graph, partition)
+    + bridging_ties(graph, partition)
+  }
+}
+
+package "app (F5)" #F3E5F5 {
+  class "main.py" as Main <<module>> {
+    + run_mining()
+    + run_build()
+    + run_analysis()
+  }
+  class "api_demo.py" as ApiDemo <<module>> {
+    + demo_all_operations()
+  }
+}
+
+AbstractGraph <|-- AdjacencyListGraph
+AbstractGraph <|-- AdjacencyMatrixGraph
+BaseBuilder <|-- Graph1CommentsBuilder
+BaseBuilder <|-- Graph2ClosuresBuilder
+BaseBuilder <|-- Graph3ReviewsBuilder
+BaseBuilder <|-- Graph4IntegratedBuilder
+
+IssueMiner --> GitHubClient : usa
+PRMiner --> GitHubClient : usa
+IssueMiner ..> Interaction : cria
+PRMiner ..> Interaction : cria
+DataExporter ..> Interaction : persiste
+
+BaseBuilder --> AbstractGraph : popula
+BaseBuilder --> UserRegistry : usa
+Graph4IntegratedBuilder --> AbstractGraph : soma pesos
+
+Centrality ..> AbstractGraph : recebe
+Structure ..> AbstractGraph : recebe
+Community ..> AbstractGraph : recebe
+
+Main --> IssueMiner
+Main --> PRMiner
+Main --> DataExporter
+Main --> Graph1CommentsBuilder
+Main --> Centrality
+Main --> Structure
+Main --> Community
+
+ApiDemo --> AbstractGraph : demonstra
+
+@enduml
