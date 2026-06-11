@@ -25,12 +25,13 @@ Documento **único** do projeto para estudo do caso e leitura em grupo. Descreve
 
 ---
 
-## 1. Visão Geral do Projeto
+## Visão Geral do Projeto
 
 O GitHub Graph Analyzer é uma ferramenta acadêmica que minera dados de colaboração de um repositório GitHub e os representa como grafos direcionados ponderados. A análise cobre comentários em issues, fechamentos, revisões de pull requests e merges — transformando atividade social em estruturas de grafo analisáveis.
 
 O repositório analisado é o `github/spec-kit`. Todo o pipeline é executado localmente, sem dependência de bibliotecas externas de grafos (networkx, igraph etc. são proibidos pelo enunciado).
 
+## 1. Panorama do pipeline
 ### 1.1 Fluxo Geral de Dados
 
 | Etapa | Comando CLI | Entrada | Saída |
@@ -42,7 +43,19 @@ O repositório analisado é o `github/spec-kit`. Todo o pipeline é executado lo
 
 A F2 (Graph Structures) não aparece como etapa separada na CLI — ela é a biblioteca de grafos que as frentes F3 e F4 usam internamente. O comando `--all` executa `mine → build → analyze` em sequência.
 
-### 1.2 Os Quatro Grafos
+### 1.2 Comandos principais
+
+```bash
+python -m src.app.main --mine      # F1 — chama GitHub API
+python -m src.app.main --build     # F3 — lê CSVs, gera GEXF
+python -m src.app.main --analyze   # F4 — lê CSVs, gera relatórios
+python -m src.app.main --all       # pipeline completo
+python -m src.app.api_demo         # demo de toda API do grafo (F2)
+
+cd ../frontend-grafogen && npm run dev   # GrafoGen (F5.5) — :5173 + API :3001
+```
+
+### 1.3 Modelagem dos quatro grafos (enunciado)
 
 | Grafo | O que modela | Tipos de interação usados |
 |-------|-------------|--------------------------|
@@ -53,7 +66,7 @@ A F2 (Graph Structures) não aparece como etapa separada na CLI — ela é a bib
 
 Em todos os grafos, uma aresta A → B significa que o usuário A realizou uma ação sobre um artefato do usuário B. Os grafos são direcionados, simples (sem laços, sem multi-arestas) e os vértices são indexados de 0 a n-1.
 
-### 1.3 Pesos Oficiais das Interações
+### 1.4 Pesos Oficiais das Interações
 
 | Tipo de interação | Significado | Peso |
 |-------------------|-------------|------|
@@ -287,8 +300,8 @@ AdjacencyMatrixGraph — matriz n×n onde: (i,j sao indices dos usuarios)
 | Iterar todas as arestas | O(n²) |
 
 ### 3.4 AdjacencyListGraph
-AdjacencyListGraph usa um dict de dicts onde _adjacency[u][v] = peso, guardando só as arestas que realmente existem. - Armazwna pares de chave.
-- É naturalmente boa pra vizinhança porque a estrutura já é organizada por vértice. A lista de adjacência é naturalmente boa pra vizinhança porque a estrutura já é organizada por vértice.
+AdjacencyListGraph usa um dict de dicts onde _adjacency[u][v] = peso, guardando só as arestas que realmente existem. - Armazena pares de chave.
+- A lista de adjacência é naturalmente boa pra vizinhança porque a estrutura já é organizada por vértice.
 Quando você quer saber os vizinhos de u, é só olhar _adjacency[u] — ele já é um dict com todos os vizinhos diretos.
 
 AdjacencyListGraph — dicionário onde:
