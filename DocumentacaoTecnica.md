@@ -634,170 +634,241 @@ O `main.py` é o ponto de entrada da linha de comando. Orquestra as frentes F1, 
 
 ---
 
-## 7. F5.5 — GrafoGen Frontend (`frontend-grafogen/`)
 
-**Responsável: Matheus Felipe**
+## 5.2 F5.5 — GrafoGen (`frontend-grafogen/`)
 
-SPA que detecta o estado atual do pipeline, permite executar cada etapa Python via browser, visualiza os quatro grafos de forma interativa e exibe métricas de centralidade.
+**Responsável:** Matheus Felipe
 
-### 7.1 Stack Tecnológica
+SPA que complementa o Gephi: detecta estado do pipeline, executa etapas Python, visualiza G1–G4 e exibe métricas de centralidade.
+
+### Estrutura do projeto
+
+```text
+frontend-grafogen/
+├── server/index.js              # API Express (porta 3001)
+├── src/
+│   ├── App.tsx                  # rotas React Router
+│   ├── pages/
+│   │   ├── HomePage.tsx         # pipeline + cards G1–G4
+│   │   └── VisualizePage.tsx    # canvas + sidebar
+│   ├── components/
+│   │   ├── graph/               # GraphCanvas, GraphSidebar, ExportModal, MetricsPanel, ZoomControls
+│   │   ├── home/GraphTypeCard.tsx
+│   │   ├── pipeline/            # PipelineCard, LogsModal
+│   │   └── layout/Navbar.tsx
+│   ├── stores/                  # graphStore, pipelineStore, uiStore (Zustand)
+│   ├── hooks/usePipelineStatus.ts
+│   └── utils/                   # api.ts, gexfParser.ts, graphExporter.ts, graphOptions.ts
+├── vite.config.ts               # proxy /api → :3001
+└── package.json
+```
+
+### Stack
 
 | Camada | Tecnologia |
-|--------|-----------|
+|--------|------------|
 | UI | React 19 + TypeScript + Vite 8 |
 | Estilo | Tailwind CSS 4 |
-| Visualização de grafo | vis-network (canvas WebGL) |
-| Gerenciamento de estado | Zustand 5 |
-| Roteamento | React Router 7 |
+| Grafo | vis-network (canvas) |
+| Estado | Zustand 5 |
+| Rotas | React Router 7 |
 | API local | Express 5 (Node.js) |
-| Orquestração Python | `spawn('python', ['-m', 'src.app.main', '--{stage}'])` |
+| Orquestração | `spawn('python', ['-m', 'src.app.main', '--{stage}'])` |
 
-### 7.2 Como Rodar
+### Como rodar
 
 ```bash
 cd frontend-grafogen
 npm install
-npm run dev   # inicia API Express (3001) + Vite (5173) em paralelo
+npm run dev          # concurrently: API + Vite
 ```
 
-Pré-requisitos: Node 18+, Python 3.10+ com `requirements.txt` instalado. Os dados de `data/raw/` e `output/` são opcionais — o frontend detecta automaticamente quais etapas já foram executadas.
+| URL / porta | Serviço |
+|-------------|---------|
+| http://localhost:5173 | Frontend Vite |
+| http://localhost:3001 | API Express (`API_PORT` opcional) |
 
-### 7.3 API Express (`/api`)
+Scripts: `dev:web` (só Vite), `dev:api` (só Express), `build` (produção).
+
+**Pré-requisitos:** Node 18+; Python 3.10+ com `requirements.txt` do backend; dados opcionais em `github-graph-analyzer/data/raw/` e `output/`.
+
+### Arquitetura runtime
+
+```text
+Browser (:5173)  ──/api/* (proxy Vite)──►  Express (:3001)
+                                                │
+                    ┌───────────────────────────┼───────────────────────────┐
+                    │ spawn python            │ leitura FS                  │
+                    ▼                         ▼                             │
+            src.app.main                 data/raw/                          │
+            --mine|--build|--analyze     output/graphs/*.gexf               │
+                                         output/reports/*                    │
+```
+
+`BACKEND_ROOT` em `server/index.js` resolve para `../../github-graph-analyzer` (caminho relativo ao `server/`).
+
+### API Express (`/api`)
 
 | Método | Rota | Comportamento |
-|--------|------|--------------|
-| `GET` | `/status` | Estado do pipeline. Verificado a cada 3s pela Home via polling. Indica quais etapas foram concluídas. |
-| `GET` | `/graphs/:type` | Retorna o GEXF XML. `:type` aceita `G1`, `G2`, `G3` ou `G4`. |
-| `GET` | `/reports/:name` | Retorna `centrality.csv`, `communities.csv` ou `structure.json`. |
-| `POST` | `/pipeline/:stage` | Dispara `mine`, `build` ou `analyze`. Retorna 409 se já há processo rodando. |
-| `POST` | `/pipeline/cancel` | Envia SIGTERM para o processo Python ativo. |
+|--------|------|---------------|
+| GET | `/status` | Estado do pipeline (poll a cada 3s na Home via `usePipelineStatus`) |
+| GET | `/graphs/:type` | GEXF XML; `:type` ∈ `{G1,G2,G3,G4}` |
+| GET | `/reports/:name` | `centrality.csv`, `communities.csv` ou `structure.json` |
+| POST | `/pipeline/:stage` | `mine`, `build` ou `analyze`; 409 se já houver processo |
+| POST | `/pipeline/cancel` | `SIGTERM` no processo ativo |
 
-**Detecção de Status do Pipeline:**
+**Mapeamento GEXF** (igual aos builders F3):
 
-| Campo em `/status` | Critério de verificação |
-|--------------------|------------------------|
-| `stage1Complete` | Existem `data/raw/users.csv` e `data/raw/interactions.csv` |
-| `stage2Complete` | Os 4 arquivos GEXF existem em `output/graphs/` |
-| `stage3Complete` | Existem `centrality.csv` e `communities.csv` em `output/reports/` |
-| `interactionCount` | Número de linhas de `interactions.csv` menos o cabeçalho |
+| Tipo | Arquivo |
+|------|---------|
+| G1 | `graph1_comments.gexf` |
+| G2 | `graph2_closures.gexf` |
+| G3 | `graph3_reviews.gexf` |
+| G4 | `graph4_integrated.gexf` |
 
-### 7.4 Rotas React
+**Detecção de etapas em `/status`:**
+
+| Campo | Critério no código |
+|-------|-------------------|
+| `stage1Complete` | existem `data/raw/users.csv` e `interactions.csv` |
+| `stage2Complete` | os 4 GEXF existem |
+| `stage3Complete` | existem `centrality.csv` **e** `communities.csv` em `output/reports/` |
+| `metricsAvailable` | igual a `stage3Complete` |
+| `interactionCount` | linhas de `interactions.csv` menos cabeçalho |
+
+Logs da execução Python ficam em `logs` (últimas 200 linhas).
+
+### Rotas e telas (React)
 
 | Rota | Componente | Função |
-|------|-----------|--------|
-| `/` | `HomePage` | Cards do pipeline (mine → build → analyze), logs de execução, cards G1–G4 disponíveis |
-| `/visualize/:graphId` | `VisualizePage` | Visualização interativa do grafo. `graphId` aceita `G1`, `G2`, `G3` ou `G4`. |
+|------|------------|--------|
+| `/` | `HomePage` | Cards do pipeline (mine → build → analyze), logs, cards G1–G4 |
+| `/visualize/:graphId` | `VisualizePage` | Visualização (`graphId` = `G1`…`G4`) |
 
-### 7.5 Componentes Principais
+**Home:** ao clicar em card de grafo disponível → `fetchGraphGexf` → `parseGEXF` → `navigate('/visualize/G1')` (etc.). Após `--analyze`, carrega `centrality.csv` no store. Há também **importação de GEXF** (upload com seletor de tipo) e lista de **grafos recentes** (`localStorage`).
+
+**Visualize:** se o grafo já está em memória, reutiliza; senão busca GEXF na API (ou cache de upload). Carrega `centrality.csv` e `communities.csv` para métricas e coloração.
+
+### Componentes principais
 
 | Componente | Função |
-|-----------|--------|
-| `GraphCanvas` | Renderiza o grafo com vis-network. Suporta filtro por peso mínimo (`minWeight`), destaque de nós na busca, coloração por comunidade e foco animado em vértice específico. |
-| `GraphSidebar` | Troca de grafo, campo de busca por login (foco ao pressionar Enter), slider de peso mínimo (G4), botões de exportar e métricas. |
-| `MetricsPanel` | Exibe top 10 usuários por pagerank, betweenness, degree_in ou closeness. Permite toggle de coloração por comunidade. |
-| `ExportModal` | Exporta o grafo como PNG (1920x1080 ou 3840x2160), SVG vetorial ou formato DOT. |
-| `ZoomControls` | Botões de zoom in, zoom out e fit (centraliza o grafo na tela). |
-| `PipelineCard + LogsModal` | Dispara cada etapa do pipeline Python e exibe os logs de execução em tempo real. |
+|------------|--------|
+| `GraphCanvas` | Vis-Network; filtro `minWeight`; destaque na busca; cores por comunidade; foco animado no vértice |
+| `GraphSidebar` | Troca de grafo, busca/foco por login (Enter), slider de peso mínimo (G4), exportar/métricas |
+| `MetricsPanel` | Top 10 por **pagerank**, **betweenness**, **degree_in** ou **closeness**; toggle colorir por comunidade |
+| `ExportModal` | PNG (1920×1080 ou 3840×2160), **SVG** vetorial ou DOT |
+| `ZoomControls` | Zoom in/out e fit |
+| `PipelineCard` + `LogsModal` | Disparo e acompanhamento das etapas Python |
 
-### 7.6 `gexfParser.ts`
+### `gexfParser.ts`
 
-Converte o GEXF 1.3 gerado por `gephi_exporter.py` (F2) para o modelo interno do frontend. Cada nó vira um objeto com `id` (índice) e `label` (login). Cada aresta vira um objeto com `source`, `target` e `weight`. Para G1–G3, o peso padrão é 1 se o atributo estiver ausente; para G4, é 0 até a leitura do atributo.
+Converte GEXF 1.3 (saída de `gephi_exporter.py`) para o modelo interno:
 
-A função `parseCSVMetrics(csv)` converte o `centrality.csv` em uma lista de objetos com os campos `login`, `graph`, `degree_in`, `degree_out`, `betweenness`, `closeness` e `pagerank`, armazenados no `graphStore`.
+- **Nó:** `id` (índice), `label` (login)
+- **Aresta:** `source`, `target`, `weight` (atributo GEXF `for="0"`)
+- G1–G3: peso default 1 se ausente; G4: default 0 até ler atributo
 
-### 7.7 Regras de Performance (`graphOptions.ts`)
+`parseCSVMetrics(csv)` → lista para `graphStore.metrics` (campos: login, graph, degree_in, degree_out, betweenness, closeness, pagerank).
 
-| Condição | Comportamento aplicado |
-|----------|----------------------|
-| <= 500 vértices | Labels visíveis diretamente no canvas |
-| > 500 vértices | Labels ocultos; exibidos como tooltip no hover |
-| <= 1000 vértices | Física vis-network habilitada (forceAtlas2Based) |
-| > 1000 vértices | Física desligada (layout estático para performance) |
-| Tamanho do nó | 16px com <= 500 vértices; 8px com > 500 |
-| Largura da aresta | Proporcional a `log(weight + 1)` |
+### `graphOptions.ts` — regras de performance
 
-### 7.8 Integração com as Frentes
+| Vértices | Comportamento |
+|----------|---------------|
+| ≤ 500 | labels visíveis no canvas |
+| > 500 | labels ocultos; **tooltip** (`title`) no hover |
+| ≤ 1000 | física Vis-Network habilitada (`forceAtlas2Based`) |
+| > 1000 | física **desligada** |
 
-| Frente | Artefato consumido pelo GrafoGen |
-|--------|----------------------------------|
-| F1 | `users.csv` e `interactions.csv` (para verificar `stage1Complete`) |
-| F3 | `output/graphs/*.gexf` (visualização dos grafos) |
-| F4 | `centrality.csv` (métricas), `communities.csv` (coloração por comunidade), `structure.json` |
+Tamanho do nó: 16 px (≤500 vértices) ou 8 px (>500). Largura da aresta proporcional a `log(weight+1)` no canvas.
 
----
+### Cliente `api.ts`
 
-## 8. Fluxo Completo: da API ao Grafo
+- `fetchStatus()`, `fetchGraphGexf(type)`, `fetchReport(name)`
+- `runPipelineStage('mine'|'build'|'analyze')`, `cancelPipeline()`
 
-### Etapa 1 — Mineração (F1)
+### Integração com F1–F4
 
-1. `GitHubClient` autentica com o token do `.env`
-2. `IssueMiner` percorre todas as issues via `get_issues(state='all')`, filtrando PRs
-3. Para cada issue: extrai comentários (`comment_issue` + `open_issue_commented`) e fechamentos (`close_issue`)
-4. `PRMiner` percorre todos os PRs via `get_pulls(state='all')`
-5. Para cada PR: extrai comentários gerais, comentários em linha de código, reviews e merges
-6. Cada interação entre usuários distintos vira um objeto `Interaction`
-7. `DataExporter` grava `users.csv`, `interactions.csv` e `events.csv` em `data/raw/`
+| Frente | Artefato consumido |
+|--------|-------------------|
+| F1 | `users.csv`, `interactions.csv` (status etapa 1) |
+| F3 | `output/graphs/*.gexf` (visualização) |
+| F4 | `centrality.csv` (métricas) e `communities.csv` (coloração); `structure.json` exposto pela API |
 
-### Etapa 2 — Build dos Grafos (F3)
+### Limitações conhecidas (código atual)
 
-1. `BaseBuilder` carrega `users.csv` → `UserRegistry` atribui índice `0..n-1` a cada login
-2. `interactions.csv` é lido linha por linha
-3. Cada builder filtra as linhas pelo campo `type`
-4. Para cada interação filtrada: `add_edge(src_idx, dst_idx)` + `set_edge_weight(src_idx, dst_idx, peso)`
-5. G4 acumula pesos; G1–G3 usam apenas a primeira ocorrência de cada par
-6. `export_to_gephi()` serializa cada grafo como GEXF 1.3 em `output/graphs/`
+| Item | Status |
+|------|--------|
+| `structure.json` na UI | não consumido (disponível via `GET /api/reports/structure.json`) |
+| Persistência de posições do layout | não salva entre sessões (física Vis-Network recalcula) |
+| Upload GEXF muito grande | cache em `localStorage` pode falhar por quota do navegador |
 
-### Etapa 3 — Análise (F4)
+### Resumo rápido F5 / GrafoGen
 
-1. `run_analysis()` reconstrói cada grafo em memória chamando os builders novamente
-2. Para cada grafo: `degree_centrality`, `betweenness_centrality`, `closeness_centrality` e `pagerank`
-3. Para cada grafo: `density`, `clustering_coefficient` e `degree_assortativity`
-4. Para cada grafo: `detect_communities` (Louvain), `modularity` e `bridging_ties`
-5. Resultados salvos em `output/reports/`
-
-### Etapa 4 — Visualização (F5.5)
-
-1. Frontend detecta `stage1Complete`, `stage2Complete` e `stage3Complete` via polling em `/api/status`
-2. Usuário clica em um card de grafo → `fetchGraphGexf(G1)` busca o GEXF via `/api/graphs/G1`
-3. `gexfParser.ts` converte o GEXF em nós e arestas para o vis-network
-4. Se `stage3Complete`, `centrality.csv` é carregado e métricas ficam disponíveis no `MetricsPanel`
-5. `communities.csv` habilita a coloração por comunidade no `GraphCanvas`
-6. Usuário pode filtrar arestas por peso mínimo, buscar usuários, exportar o grafo e navegar entre G1–G4
+- **F5:** `main.py` liga F1+F3+F4 na linha de comando.
+- **GrafoGen:** mesma pipeline via browser; lê GEXF e `centrality.csv`; interface mínima exigida pela Etapa 2, estendida para estudo visual do caso `spec-kit`.
 
 ---
 
-## 9. Comandos de Referência
+# Anexo — Comandos e checklists
 
-### Pipeline
-
-```bash
-python -m src.app.main --mine                    # Mineração
-python -m src.app.main --build                   # Build dos grafos
-python -m src.app.main --analyze                 # Análise
-python -m src.app.main --all                     # Pipeline completo
-python -m src.app.api_demo                       # Demo da API de grafos (F2)
-cd frontend-grafogen && npm run dev              # GrafoGen em localhost:5173
-```
-
-### Testes
+## Comandos de teste por frente
 
 ```bash
-pytest tests/test_mining.py -q                                            # F1
-pytest tests/test_graph_matrix.py tests/test_graph_list.py -q            # F2
-pytest tests/test_builder.py -q                                           # F3
-pytest tests/test_analysis.py -q                                          # F4
-pytest tests/ -q                                                          # Todos (~290 testes)
-pytest --cov=src tests/                                                   # Cobertura geral (~99%)
-npm test            # (em frontend-grafogen/) Vitest
-npm run test:coverage                                                     # Cobertura frontend
+pytest tests/test_mining.py -q
+pytest tests/test_graph_matrix.py tests/test_graph_list.py -q
+pytest tests/test_builder.py -q
+pytest tests/test_analysis.py -q
+pytest tests/ -q                    # todos (290+ testes; ≥98% em src/ via pytest.ini)
+pytest --cov=src tests/             # cobertura backend (~99%)
+
+cd ../frontend-grafogen
+npm test                            # Vitest — parsers, export, comunidades, recentes
+npm run test:coverage               # meta ≥ 90% em src/utils/
 ```
 
-### Metas de Cobertura
+## Checklists de entrega
 
-| Frente | Meta |
-|--------|------|
-| F1 — `src/mining/` | >= 98% |
-| F2 — `src/graph/` | >= 98% |
-| F3 — `src/builder/` | >= 98% |
-| F4 — `src/analysis/` | >= 98% |
-| F5.5 — `src/utils/` (frontend) | >= 90% |
+### F1 — Mining
+- [x] `GitHubClient` (auth, rate limit, retry)
+- [x] `IssueMiner` + `PRMiner` → `Interaction`
+- [x] `users.csv`, `interactions.csv`, `events.csv`
+- [x] Filtro PRs na API de issues; sem auto-interações
+- [x] CLI `--mine`
+- [x] Testes com mocks
+
+### F2 — Graph
+- [x] `AbstractGraph` + matriz + lista
+- [x] API Etapa 2 completa + rótulos
+- [x] Exceções; `add_edge` idempotente
+- [x] GEXF 1.3; `api_demo.py`
+- [x] Testes ≥ 98%
+
+### F3 — Builders
+- [x] `UserRegistry` + `BaseBuilder`
+- [x] G1, G2, G3, G4 + exportação GEXF
+- [x] CLI `--build`
+- [x] Testes ≥ 98%
+
+### F4 — Analysis
+- [x] Todas as métricas do enunciado
+- [x] Relatórios em `output/reports/`
+- [x] CLI `--analyze`
+- [x] Testes com grafos de referência
+
+### F5 — Integração
+- [x] CLI `--mine`, `--build`, `--analyze`, `--all`
+- [x] `api_demo.py` demonstrando toda API do grafo
+- [x] Testes em `tests/test_app.py` (pipeline CLI + demo)
+
+### F5.5 — GrafoGen
+- [x] SPA Home + Visualize
+- [x] API Express + spawn Python
+- [x] Vis-Network, export PNG/SVG/DOT, métricas (centrality + closeness)
+- [x] Coloração por comunidade, foco em vértice, upload GEXF, histórico recente
+- [x] Testes Vitest em `src/utils/` (cobertura ≥ 90%)
+
+## Outros materiais
+
+- [diagramas/](./diagramas/) — UML PlantUML + PNG
+- [tp-es.pdf](../Orientação%20Trabalho/tp-es.pdf) — enunciado oficial
+
