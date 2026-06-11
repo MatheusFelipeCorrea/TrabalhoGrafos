@@ -1,4 +1,17 @@
-# Documentação Técnica — GitHub Graph Analyzer
+# GitHub Graph Analyzer — Documentação Técnica
+
+> Repositório analisado: `github/spec-kit`
+
+| Frente | Responsável | Pasta |
+|--------|-------------|-------|
+| F1 — Mining | Arthur Henrique | `src/mining/` |
+| F2 — Graph Structures | Matheus Felipe | `src/graph/` |
+| F3 — Builders | Alice Shikida | `src/builder/` |
+| F4 — Analysis | Diogo Meireles | `src/analysis/` |
+| F5 — Integração (CLI) | Diogo Meireles | `src/app/main.py` |
+| F5.5 — Frontend GrafoGen | Matheus Felipe | `frontend-grafogen/` |
+
+---
 
 ## 1. Visão Geral do Projeto
 
@@ -41,830 +54,598 @@ Em todos os grafos, uma aresta A → B significa que o usuário A realizou uma a
 
 ---
 
-# PARTE 1 — F1 Mining
+## 2. F1 — Mining (`src/mining/`)
 
-**Pasta:** `src/mining/` · **Entrada:** GitHub API · **Saída:** CSVs em `data/raw/`
+**Responsável: Arthur Henrique**
 
-## 1.1 Visão geral
+A frente de mineração é o ponto de entrada do pipeline. Ela acessa a API do GitHub via PyGithub e transforma a atividade do repositório em arquivos CSV estruturados que alimentam as demais frentes.
 
-O minerador coleta dados de `github/spec-kit` via **PyGithub** e gera três arquivos:
+### 2.1 Configuração e Dependências
 
-- `users.csv` — usuários vistos na mineração
-- `interactions.csv` — arestas usuario→usuario para os builders
-- `events.csv` — log bruto de eventos (nem tudo vira aresta)
+Dependências principais (`requirements.txt`): `PyGithub`, `python-dotenv`, `pandas`, `tqdm`, `pytest`, `pytest-cov`.
 
-```bash
-python -m src.app.main --mine --repo github/spec-kit
+O token de acesso é lido do arquivo `.env` (baseado em `.env.example`):
+
 ```
-
-Se `--repo` for omitido, o padrão também é `github/spec-kit`.
-
-## 1.2 Configuração
-
-Dependências (`requirements.txt`): PyGithub, python-dotenv, pandas, tqdm, pytest, pytest-cov.
-
-Token em `.env` (baseado em `.env.example`):
-
-```env
 GITHUB_TOKEN=seu_token_aqui
 ```
 
-Sem token a mineração pode funcionar em repos pequenos, mas tende a bater rate limit. **Nunca versionar `.env` com token real.**
+Sem token, a mineração pode funcionar em repositórios pequenos, mas tende a atingir o rate limit da API do GitHub rapidamente. O arquivo `.env` nunca deve ser versionado.
 
-## 1.3 Fluxo de `run_mining()` (`main.py`)
+### 2.2 Execução
 
-1. Criar `GitHubClient`
-2. Criar `IssueMiner` e `PRMiner`
-3. `issue_miner.mine(repo)` → lista de `Interaction`
-4. `pr_miner.mine(repo)` → lista de `Interaction`
-5. Juntar interações e eventos brutos
-6. `users_from_interactions()` → lista de usuários
-7. `DataExporter` grava os três CSVs
-8. Imprime estatísticas (`scanned_items`, `mined_issues`, `skipped_pull_requests`)
+```bash
+python -m src.app.main --mine
+python -m src.app.main --mine --repo github/spec-kit
+```
 
-## 1.4 `github_client.py` — `GitHubClient`
+Se `--repo` for omitido, o padrão já é `github/spec-kit`.
 
-Encapsula acesso ao GitHub com retry e rate limit.
+### 2.3 Arquivos e Classes
+
+#### `github_client.py` — `GitHubClient`
+
+Encapsula todo o acesso à API do GitHub, adicionando lógica de retry e controle de rate limit para tornar a mineração resiliente a falhas temporárias.
 
 | Método | O que faz |
 |--------|-----------|
-| `__init__(token=None, sleep=time.sleep)` | Usa `token` ou `GITHUB_TOKEN` do ambiente; `sleep` injetável para testes |
-| `get_repo(full_name)` | Recebe `owner/repo`; lança `ValueError` se formato inválido |
-| `request_with_retry(op_name, operation, max_retries=5)` | Executa `operation()` com retry exponencial + jitter |
-| `_is_retryable_error(error)` | Retentável: rate limit, 403/429/5xx, timeout, connection error |
-| `_rate_limit_delay(error)` | Espera até `x-ratelimit-reset` quando disponível |
+| `__init__(token, sleep)` | Usa o token passado ou busca `GITHUB_TOKEN` do ambiente. O parâmetro `sleep` é injetável, facilitando testes unitários sem esperas reais. |
+| `get_repo(full_name)` | Recebe uma string no formato `owner/repo` e retorna o objeto repositório. Lança `ValueError` se o formato for inválido. |
+| `request_with_retry(op_name, operation, max_retries=5)` | Executa uma operação qualquer com retry exponencial mais jitter aleatório. Aceita até 5 tentativas por padrão. |
+| `_is_retryable_error(error)` | Identifica se um erro justifica nova tentativa: rate limit, HTTP 403/429/5xx, timeout e erros de conexão. |
+| `_rate_limit_delay(error)` | Quando o GitHub retorna o header `x-ratelimit-reset`, calcula e aguarda exatamente o tempo necessário antes de tentar novamente. |
 
-## 1.5 `interaction_model.py`
+#### `interaction_model.py` — `Interaction` e `MiningEvent`
 
-### `Interaction` — vira aresta de grafo
+Define os dois modelos de dados produzidos pela mineração.
 
-Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`
+**`Interaction`** representa uma aresta do grafo. Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`. As validações no `__post_init__` garantem que os logins não sejam vazios, o tipo seja um dos permitidos, `src` seja diferente de `dst`, `weight` seja positivo e `timestamp` seja obrigatório. O método `to_row()` converte o objeto em dicionário para escrita no CSV.
 
-**Tipos permitidos:**
+Tipos permitidos em `Interaction`:
+- `comment_issue` — comentário em issue
+- `comment_pr` — comentário em PR
+- `open_issue_commented` — autor da issue ao receber comentário
+- `review_pr` — revisão de PR
+- `merge_pr` — merge de PR por terceiro
+- `close_issue` — fechamento de issue por terceiro
 
-```text
-comment_issue | comment_pr | open_issue_commented | review_pr | merge_pr | close_issue
-```
+**`MiningEvent`** é um log bruto de eventos. Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`. Ao contrário de `Interaction`, o destino pode ser vazio e auto-interações são permitidas no log. `MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
 
-**Validações (`__post_init__`):** logins não vazios; `type` válido; `src ≠ dst`; `weight > 0`; `timestamp` obrigatório.
+#### `issue_miner.py` — `IssueMiner`
 
-`to_row()` → dicionário para CSV.
+> **Particularidade importante:** a API `repo.get_issues(state='all')` do GitHub retorna tanto issues reais quanto pull requests (PRs possuem o campo `pull_request` preenchido). O `IssueMiner` filtra e ignora todos os itens com `pull_request` preenchido, garantindo que apenas issues reais sejam processadas. As estatísticas `scanned_items`, `mined_issues` e `skipped_pull_requests` permitem auditar esse processo.
 
-### `MiningEvent` — log bruto (não vira aresta diretamente)
+Para cada issue real, o método `_extract_issue_interactions(issue)` executa:
 
-Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`
+| Situação | Evento gerado | Arestas geradas |
+|----------|---------------|-----------------|
+| Alguém comenta na issue | `issue_comment` | `commenter → author` (`comment_issue`, peso 2) e `author → commenter` (`open_issue_commented`, peso 3) |
+| A issue é fechada por outra pessoa | `issue_closed` | `quem_fechou → author` (`close_issue`, peso 3) |
 
-**Tipos:** `issue_comment`, `issue_closed`, `pr_opened`, `pr_comment`, `pr_review`, `pr_approval`, `pr_merged`
+O método `_should_skip_self_interaction(src, dst)` descarta qualquer interação onde origem e destino são o mesmo login ou onde algum dos dois está vazio.
 
-| | `Interaction` | `MiningEvent` |
-|---|---------------|---------------|
-| Destino | obrigatório | pode ser vazio |
-| Auto-interação | proibida | permitida no log |
-| Peso | sim | não |
-| Arquivo | `interactions.csv` | `events.csv` |
+#### `pr_miner.py` — `PRMiner`
 
-## 1.6 `issue_miner.py` — `IssueMiner`
+Usa `repo.get_pulls(state='all')` e extrai interações de cada PR via `_extract_pr_interactions(pr)`. As fontes de dados são: `pr.get_issue_comments()` para comentários gerais, `pr.get_review_comments()` para comentários em linhas de código, e `pr.get_reviews()` para aprovações e pedidos de mudança.
 
-### Por que filtrar PRs na API de issues?
+| Situação | Evento (`events.csv`) | Aresta (`interactions.csv`) |
+|----------|----------------------|----------------------------|
+| Abertura do PR | `pr_opened` | Nenhuma (sem outro usuário envolvido) |
+| Comentário geral ou em linha | `pr_comment` | `commenter → author` (`comment_pr`, peso 2) |
+| Review `APPROVED` | `pr_approval` | `reviewer → author` (`review_pr`, peso 4) |
+| Review `CHANGES_REQUESTED` ou `COMMENTED` | `pr_review` | `reviewer → author` (`review_pr`, peso 4) |
+| Merge por outra pessoa | `pr_merged` | `merged_by → author` (`merge_pr`, peso 5) |
+| Merge pelo próprio autor | `pr_merged` | Evento sim, aresta não (evita laço no grafo) |
 
-`repo.get_issues(state="all")` retorna **issues + PRs** (PRs têm campo `pull_request`). O `IssueMiner` ignora itens com `pull_request` preenchido.
+#### `data_exporter.py` — `DataExporter`
 
-**Stats:** `scanned_items`, `mined_issues`, `skipped_pull_requests`
+| Método | Arquivo gerado | Observação |
+|--------|---------------|------------|
+| `export_users_csv(users)` | `data/raw/users.csv` | Deduplica por login, ordena alfabeticamente |
+| `export_interactions_csv(interactions)` | `data/raw/interactions.csv` | Usa `Interaction.to_row()` em cada objeto |
+| `export_events_csv(events)` | `data/raw/events.csv` | Usa `MiningEvent.to_row()` em cada objeto |
+| `users_from_interactions(interactions, events)` | (lista em memória) | Extrai todos os logins únicos de interações e eventos |
 
-### `_extract_issue_interactions(issue)`
+### 2.4 Schemas dos CSVs (Contrato com F3)
 
-Para cada **issue real**:
+| Arquivo | Colunas |
+|---------|---------|
+| `users.csv` | `login`, `user_id`, `name` |
+| `interactions.csv` | `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id` |
+| `events.csv` | `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state` |
 
-**Comentários** (`issue.get_comments()`):
+`interactions.csv` não tem uma linha por issue, mas sim uma linha por interação ocorrida (cada comentário, fechamento etc. gera entradas separadas). O campo `source_id` é o número da issue ou PR, não uma contagem sequencial.
 
-- Evento: `issue_comment`
-- Aresta: `commenter → author` (`comment_issue`, peso 2)
-- Aresta reversa: `author → commenter` (`open_issue_commented`, peso 3)
+### 2.5 Fluxo Completo de `run_mining()`
 
-Exemplo: alice abriu, bob comentou → `bob→alice` (2) e `alice→bob` (3)
+1. Criação do `GitHubClient` com o token do ambiente
+2. Criação das instâncias de `IssueMiner` e `PRMiner`
+3. `issue_miner.mine(repo)` percorre todas as issues e retorna lista de `Interaction`
+4. `pr_miner.mine(repo)` percorre todos os PRs e retorna lista de `Interaction`
+5. As listas de interações e eventos são combinadas
+6. `users_from_interactions()` extrai os logins únicos
+7. `DataExporter` grava os três CSVs em `data/raw/`
+8. Estatísticas são impressas no terminal
 
-**Fechamento** (`issue.get_events()`, filtro `event == "closed"`):
+### 2.6 Testes F1
 
-- Evento: `issue_closed`
-- Aresta: `quem_fechou → author` (`close_issue`, peso 3)
-
-`_should_skip_self_interaction(src, dst)` descarta origem=destino ou vazios.
-
-## 1.7 `pr_miner.py` — `PRMiner`
-
-Fluxo: `repo.get_pulls(state="all")` → `_extract_pr_interactions(pr)` por PR.
-
-| Situação | Evento (`events.csv`) | Interação (`interactions.csv`) |
-|----------|----------------------|-------------------------------|
-| Abertura de PR | `pr_opened` | **não cria** (sem destino outro usuário) |
-| Comentário geral | `pr_comment` | `commenter → author` (`comment_pr`, 2) |
-| Comentário em linha (review) | `pr_comment` | idem |
-| Review APPROVED | `pr_approval` | `reviewer → author` (`review_pr`, 4) |
-| Review CHANGES_REQUESTED / COMMENTED | `pr_review` | idem (`review_pr`, 4) |
-| Merge (por terceiro) | `pr_merged` | `merged_by → author` (`merge_pr`, 5) |
-| Merge pelo próprio autor | `pr_merged` | evento sim, aresta **não** (evita laço) |
-
-Fontes de comentário: `pr.get_issue_comments()` e `pr.get_review_comments()`. Reviews: `pr.get_reviews()`.
-
-## 1.8 `data_exporter.py` — `DataExporter`
-
-| Método | Saída | Observação |
-|--------|-------|------------|
-| `export_users_csv` | `users.csv` | dedup por `login`, ordenado |
-| `export_interactions_csv` | `interactions.csv` | via `Interaction.to_row()` |
-| `export_events_csv` | `events.csv` | via `MiningEvent.to_row()` |
-| `users_from_interactions` | (lista) | logins de interações + eventos |
-
-`user_id` e `name` podem ficar vazios na versão atual.
-
-## 1.9 Schemas dos CSVs (contrato com F3)
-
-### `users.csv`
-
-```csv
-login,user_id,name
-```
-
-### `interactions.csv`
-
-```csv
-src_login,dst_login,type,weight,timestamp,source_id
-```
-
-### `events.csv`
-
-```csv
-event_type,actor_login,target_login,source_kind,source_id,timestamp,state
-```
-
-## 1.10 Pontos de atenção (F1)
-
-- `interactions.csv` **não** conta issues: uma issue gera várias linhas (comentários, reversas, fechamento).
-- `source_id` = número da issue ou PR, não contagem sequencial por tipo.
-- `events.csv` é mais completo para auditoria; `interactions.csv` alimenta os grafos.
-- Contagem confiável de issues reais: log `Issue scan: X items, Y issues, Z PRs skipped`.
-
-## 1.11 Testes F1
-
-Arquivo: `tests/test_mining.py`
-
-Cobre: cenário feliz com mocks; filtro de PRs na API de issues; validações de `Interaction`/`MiningEvent`; retry; exportação CSV; repo inválido.
+Meta de cobertura: **>= 98%** em `src/mining/`. Cenários cobertos: mineração completa com mocks, filtro de PRs na API de issues, validações de `Interaction` e `MiningEvent`, retry exponencial, exportação CSV e repositório com formato inválido.
 
 ```bash
 python -m pytest tests/test_mining.py -q
 python -m pytest tests/test_mining.py --cov=src.mining --cov-report=term-missing -q
 ```
 
-Meta de cobertura: **≥ 98%** em `src/mining/`.
-
-## 1.12 Resumo rápido F1
-
-1. `GitHubClient` — API resiliente
-2. `IssueMiner` + `PRMiner` — API → `Interaction` + `MiningEvent`
-3. `DataExporter` — persiste CSVs
-4. `interactions.csv` = grafo · `events.csv` = auditoria
-
 ---
 
-# PARTE 2 — F2 Graph Structures
+## 3. F2 — Graph Structures (`src/graph/`)
 
-**Pasta:** `src/graph/` · **Demo:** `src/app/api_demo.py`
+**Responsável: Matheus Felipe**
 
-Base usada pela F3 (builders) e F4 (análise). Grafos do trabalho são:
+A frente de estruturas de grafo é a biblioteca central do projeto. Implementa do zero duas representações de grafos direcionados ponderados (matriz de adjacência e lista de adjacência), sem uso de bibliotecas externas como networkx ou igraph. Toda a F3 (builders) e F4 (análise) usam essa API.
 
-- **dirigidos**, **simples** (sem laços, sem multi-arestas)
-- vértices `0 .. n-1`
-- reciprocidade via **arestas anti-paralelas** (`A→B` e `B→A`)
+### 3.1 Decisões de Implementação
 
-```text
-src/graph/
-├── exceptions.py
-├── abstract_graph.py
-├── adjacency_matrix_graph.py   # numpy
-├── adjacency_list_graph.py     # dict por vértice
-└── gephi_exporter.py           # GEXF 1.3 manual
-```
+| Tema | Decisão tomada |
+|------|----------------|
+| Matriz de adjacência | Implementada com numpy (`AdjacencyMatrixGraph`) |
+| Lista de adjacência | Implementada com dict por vértice (`AdjacencyListGraph`) |
+| Peso padrão | `0.0` para vértice e aresta nova |
+| `add_edge` | Idempotente — repetir a mesma aresta não duplica nem altera o peso |
+| `is_connected()` | Verifica conectividade fraca (ignorando direção das arestas) |
+| `is_complete_graph()` | Verifica se todo par ordenado (u,v) com u != v possui aresta |
+| GEXF | Versão 1.3, com atributo `weight` nas arestas |
+| Bibliotecas de grafos | Proibidas pelo enunciado |
 
-## 2.1 Decisões de implementação
+### 3.2 `exceptions.py`
 
-| Tema | Decisão |
-|------|---------|
-| Matriz | **numpy** (`AdjacencyMatrixGraph`) |
-| Lista | **dict** por vértice (`AdjacencyListGraph`) |
-| Peso default | **0.0** (vértice e aresta nova) |
-| `add_edge` | **idempotente** — repetir não duplica nem altera peso |
-| `is_connected()` | conectividade **fraca** |
-| `is_complete_graph()` | todo par ordenado `(u,v)`, `u ≠ v` |
-| GEXF | versão **1.3**, atributo `weight` nas arestas |
-| Bibliotecas de grafos | **proibidas** (networkx, igraph, etc.) |
+| Exceção | Quando é lançada |
+|---------|------------------|
+| `InvalidVertexError` | Índice fora do intervalo [0, n-1] |
+| `SelfLoopError` | Chamada de `add_edge(u, u)` |
+| `EdgeNotFoundError` | `remove_edge` ou consulta de peso em aresta inexistente |
 
-## 2.2 `exceptions.py`
+### 3.3 `abstract_graph.py` — `AbstractGraph`
 
-| Exceção | Quando |
-|---------|--------|
-| `InvalidVertexError` | índice fora de `[0, n-1]` |
-| `SelfLoopError` | `add_edge(u, u)` |
-| `EdgeNotFoundError` | `remove_edge` / peso em aresta inexistente |
+Classe base que centraliza o contrato da API, validações comuns, contagem de vértices e arestas, pesos e rótulos de vértices e exportação GEXF. Ambas as implementações herdam desta classe.
 
-## 2.3 `abstract_graph.py` — `AbstractGraph`
+| Método | O que faz |
+|--------|-----------|
+| `get_vertex_count()` | Retorna `n`, o número de vértices do grafo |
+| `get_edge_count()` | Retorna o número de arestas existentes |
+| `has_edge(u, v)` | Verifica se existe a aresta `u → v` |
+| `add_edge(u, v)` | Cria a aresta `u → v` com peso `0.0`. Idempotente: chamadas repetidas não têm efeito |
+| `remove_edge(u, v)` | Remove a aresta `u → v`. Lança `EdgeNotFoundError` se não existir |
+| `is_successor(u, v)` | Retorna `True` se existe `u → v` (v é sucessor de u) |
+| `is_predecessor(u, v)` | Retorna `True` se existe `u → v` (u é predecessor de v) |
+| `is_divergent(u1,v1,u2,v2)` | `True` se `u1 == u2` e ambas as arestas existem (mesma origem) |
+| `is_convergent(u1,v1,u2,v2)` | `True` se `v1 == v2` e ambas as arestas existem (mesmo destino) |
+| `is_incident(u, v, x)` | `True` se `x` é `u` ou `x` é `v` (x é extremo da aresta u→v) |
+| `get_vertex_in_degree(u)` | Retorna quantas arestas chegam em `u` |
+| `get_vertex_out_degree(u)` | Retorna quantas arestas saem de `u` |
+| `set_vertex_weight(v, w)` | Define o peso do vértice `v` |
+| `get_vertex_weight(v)` | Retorna o peso do vértice `v` |
+| `set_edge_weight(u, v, w)` | Define o peso da aresta `u → v` |
+| `get_edge_weight(u, v)` | Retorna o peso da aresta `u → v`. Lança `EdgeNotFoundError` se não existir |
+| `set_vertex_label(v, label)` | Associa um rótulo de texto (ex: login) ao vértice `v` |
+| `get_vertex_label(v)` | Retorna o rótulo do vértice `v` |
+| `is_connected()` | `True` se o grafo é fracamente conectado (existe caminho ignorando direção) |
+| `is_empty_graph()` | `True` se não há arestas |
+| `is_complete_graph()` | `True` se todo par ordenado (u,v) com u != v possui aresta |
+| `export_to_gephi(path)` | Serializa o grafo como GEXF 1.3 no caminho especificado |
 
-Centraliza: contagem; pesos e rótulos de vértice; validações; relações; propriedades globais; `export_to_gephi`.
+**Idempotência de `add_edge`:**
+- Primeira chamada: cria a aresta com peso `0.0` e incrementa o contador interno
+- Chamadas repetidas: não alteram o peso nem incrementam o contador
+- Para definir o peso: usar `set_edge_weight(u, v, peso)` após o `add_edge`
 
-### API obrigatória (Etapa 2)
+### 3.4 `AdjacencyMatrixGraph`
 
-```text
-get_vertex_count()          get_edge_count()
-has_edge(u, v)              add_edge(u, v)              remove_edge(u, v)
-is_successor(u, v)          is_predecessor(u, v)
-is_divergent(u1,v1,u2,v2)   is_convergent(u1,v1,u2,v2)
-is_incident(u, v, x)
-get_vertex_in_degree(u)     get_vertex_out_degree(u)
-set_vertex_weight(v, w)     get_vertex_weight(v)
-set_edge_weight(u, v, w)    get_edge_weight(u, v)
-is_connected()              is_empty_graph()          is_complete_graph()
-export_to_gephi(path)
-set_vertex_label(v, label)  get_vertex_label(v)       # extras alinhados ao PDF
-```
-
-### Semântica das relações (arco `u → v`)
-
-- `is_successor(u, v)` — existe `u → v`
-- `is_predecessor(u, v)` — existe `u → v` (u é predecessor de v)
-- `is_divergent` — mesma origem `u1 == u2` e ambas arestas existem
-- `is_convergent` — mesmo destino `v1 == v2` e ambas existem
-- `is_incident(u, v, x)` — `x` é `u` ou `x` é `v`
-
-### Idempotência de `add_edge`
-
-1. Primeira chamada cria aresta com peso **0.0** e incrementa contagem
-2. Repetições não alteram peso nem contagem
-3. Peso definido com `set_edge_weight` **depois** de `add_edge`
-
-## 2.4 `AdjacencyMatrixGraph`
-
-- `_adjacency`: matriz booleana `n×n`
-- `_weights`: matriz float
+Mantém duas matrizes numpy de tamanho n×n: `_adjacency` (booleana, indica existência) e `_weights` (float, armazena pesos).
 
 | Operação | Complexidade |
-|----------|--------------|
+|----------|-------------|
 | `has_edge`, `add_edge`, `remove_edge` | O(1) |
-| graus | O(n) |
-| iterar arestas | O(n²) |
+| `get_vertex_in_degree`, `get_vertex_out_degree` | O(n) — percorre linha ou coluna |
+| Iterar todas as arestas | O(n²) |
 
-Indicada para grafos densos.
+Indicada para grafos densos. No contexto do projeto, é usada principalmente nos testes de equivalência com a lista de adjacência.
 
-## 2.5 `AdjacencyListGraph`
+### 3.5 `AdjacencyListGraph`
 
-- `_adjacency[u]`: dict `v → peso`
+Mantém `_adjacency[u]` como um dicionário que mapeia `v → peso` para cada vizinho `v` do vértice `u`.
 
 | Operação | Complexidade |
-|----------|--------------|
+|----------|-------------|
 | `has_edge`, `add_edge`, `remove_edge` | O(1) amortizado |
-| `get_vertex_out_degree` | O(1) |
-| `get_vertex_in_degree` | O(n) pior caso |
-| iterar arestas | O(n + m) |
+| `get_vertex_out_degree(u)` | O(1) — apenas `len(dict)` |
+| `get_vertex_in_degree(u)` | O(n) no pior caso — precisa checar todos os dicts |
+| Iterar todas as arestas | O(n + m) — proporcional a vértices + arestas |
 
-**Padrão dos builders** (grafos esparsos GitHub). Matriz e lista produzem resultados equivalentes (testado).
+É a implementação padrão usada pelos builders (F3) porque os grafos de colaboração no GitHub são esparsos. As duas implementações produzem resultados idênticos em todos os testes de equivalência.
 
-## 2.6 `gephi_exporter.py`
+### 3.6 `gephi_exporter.py`
 
-Gera **GEXF 1.3** manualmente:
+Gera arquivos GEXF versão 1.3 manualmente (sem dependências externas). O grafo é marcado como `directed` e `static`. Cada nó recebe `id` (índice numérico) e `label` (login do usuário). Cada aresta recebe o atributo `weight`.
 
 ```python
 graph.export_to_gephi("output/graphs/exemplo.gexf")
-# ou: export_to_gephi(graph, path)
 ```
 
-- grafo `directed`, `static`
-- nós: `id` (índice) + `label` (login)
-- arestas: atributo `weight`
+### 3.7 Testes F2
 
-Abre no **Gephi** ou no **GrafoGen** (Parte 5).
-
-## 2.7 Contrato esperado pela F3
-
-1. `AdjacencyListGraph(n)` ou `AdjacencyMatrixGraph(n)` com `n = |usuários|`
-2. `set_vertex_label(i, login)` para cada usuário
-3. Por interação: `add_edge(src, dst)` + `set_edge_weight(src, dst, peso)`
-4. No G4: se aresta existe, **somar** pesos
-
-## 2.8 Testes F2
+46 testes cobrindo: fluxo feliz, idempotência de `add_edge`, exceções para operações inválidas, equivalência entre matriz e lista, GEXF válido e grafos especiais (vazio, unitário, completo, desconectado).
 
 ```bash
 python -m pytest tests/test_graph_matrix.py tests/test_graph_list.py -v
 python -m pytest tests/test_graph_matrix.py tests/test_graph_list.py --cov=src.graph -q
 ```
 
-46 testes · meta **≥ 98%** em `src/graph/`.
+### 3.8 `api_demo.py`
 
-Cenários: fluxo feliz; idempotência; exceções; equivalência matriz/lista; GEXF válido; vazio/unitário/completo/desconectado.
-
-## 2.9 Demo `api_demo.py`
-
-Aplicação **separada** que executa **todas** as operações da API em grafo de 3 vértices (matriz e lista) e exporta `output/demo/graph_demo.gexf`.
+Aplicação separada que executa todas as operações da API em um grafo de 3 vértices (nas duas implementações) e exporta `output/demo/graph_demo.gexf`. É a demonstração exigida pela Etapa 2 do enunciado.
 
 ```bash
 python -m src.app.api_demo
 ```
 
-## 2.10 Resumo rápido F2
-
-Responde: *"Como representamos e manipulamos o grafo no código?"*
-
-1. `AbstractGraph` — contrato único
-2. Duas implementações intercambiáveis
-3. `exceptions.py` — proteção de estado
-4. `gephi_exporter.py` — visualização
-
 ---
 
-# PARTE 3 — F3 Builders
+## 4. F3 — Builders (`src/builder/`)
 
-**Pasta:** `src/builder/` · **Entrada:** CSVs da F1 · **Saída:** GEXF em `output/graphs/`
+**Responsável: Alice Shikida**
 
-Transforma CSVs em quatro grafos G1–G4 usando a API da F2.
+A frente de builders é a ponte entre os CSVs gerados pela mineração (F1) e os grafos em memória/GEXF. Ela lê os arquivos CSV, registra os usuários como vértices, filtra as interações por tipo e popula os grafos G1 a G4 usando a API da F2.
+
+### 4.1 Execução
 
 ```bash
 python -m src.app.main --build
 python -m src.app.main --build --output-dir data/raw --graph-output-dir output/graphs
 ```
 
-**Não chama a API do GitHub.**
+O `--build` não precisa de token nem acessa a API do GitHub. Funciona apenas com os CSVs já existentes em `data/raw/`.
 
-## 3.1 Arquivos
+### 4.2 Estrutura de Arquivos
 
-```text
-src/builder/
-├── exceptions.py
-├── interaction_weights.py      # tabela oficial de pesos
-├── user_registry.py
-├── base_builder.py
-├── graph1_comments_builder.py  # G1
-├── graph2_closures_builder.py  # G2
-├── graph3_reviews_builder.py   # G3
-└── graph4_integrated_builder.py # G4
-```
+| Arquivo | Conteúdo |
+|---------|----------|
+| `exceptions.py` | `BuilderError`, `UnknownLoginError`, `UnknownIndexError`, `InvalidCsvError` |
+| `interaction_weights.py` | Função `official_weight(tipo)` com a tabela de pesos do enunciado |
+| `user_registry.py` | Mapeamento bidirecional `login ↔ índice inteiro` |
+| `base_builder.py` | Lógica comum de build: leitura de CSV, registro de usuários, população do grafo |
+| `graph1_comments_builder.py` | Builder do G1 — filtra `comment_issue` e `comment_pr` |
+| `graph2_closures_builder.py` | Builder do G2 — filtra `close_issue` |
+| `graph3_reviews_builder.py` | Builder do G3 — filtra `review_pr` e `merge_pr` |
+| `graph4_integrated_builder.py` | Builder do G4 — usa todos os tipos, somando pesos |
 
-## 3.2 Saída por grafo
+### 4.3 `user_registry.py` — `UserRegistry`
 
-| Grafo | Builder | Filtro (`type`) | Arquivo GEXF |
-|-------|---------|-----------------|--------------|
-| G1 | `Graph1CommentsBuilder` | `comment_issue`, `comment_pr` | `graph1_comments.gexf` |
-| G2 | `Graph2ClosuresBuilder` | `close_issue` | `graph2_closures.gexf` |
-| G3 | `Graph3ReviewsBuilder` | `review_pr`, `merge_pr` | `graph3_reviews.gexf` |
-| G4 | `Graph4IntegratedBuilder` | todos `ALLOWED_TYPES` | `graph4_integrated.gexf` |
-
-Semântica das arestas: `src_login → dst_login` (quem agiu → autor do artefato).
-
-## 3.3 `user_registry.py` — `UserRegistry`
+Mantém um mapeamento bidirecional entre logins (strings) e índices inteiros (0 a n-1). A ordem de inserção define os índices, que são usados como identificadores de vértice no `AbstractGraph`.
 
 | Método | Comportamento |
-|--------|---------------|
-| `add_user(login)` | Registra; retorna índice existente se já cadastrado |
-| `get_index(login)` | Índice ou `UnknownLoginError` |
-| `get_login(index)` | Login ou `UnknownIndexError` |
+|--------|--------------|
+| `add_user(login)` | Registra o login e retorna seu índice. Se o login já existe, retorna o índice já atribuído sem duplicar. |
+| `get_index(login)` | Retorna o índice do login. Lança `UnknownLoginError` se o login não foi registrado. |
+| `get_login(index)` | Retorna o login do índice. Lança `UnknownIndexError` se o índice não existe. |
 
-Ordem de inserção define índices `0..n-1`. Preenchido de `users.csv` + logins que aparecem só em `interactions.csv`.
+O `UserRegistry` é preenchido a partir de `users.csv` primeiro e depois com logins adicionais que apareçam somente em `interactions.csv`.
 
-## 3.4 `base_builder.py` — `BaseBuilder`
+### 4.4 `base_builder.py` — `BaseBuilder`
 
-Fluxo template de `build(interactions_csv, users_csv)`:
+Implementa o fluxo template de construção do grafo. As subclasses (G1 a G4) sobrescrevem apenas `_filter_interactions()` e `_apply_interaction()`.
 
-1. Carregar e validar `users.csv`
-2. Carregar `interactions.csv` (cada linha validada como `Interaction`)
-3. `_filter_interactions()` — nas subclasses
-4. Registrar logins
-5. Instanciar grafo (`AdjacencyListGraph` por padrão)
-6. `set_vertex_label(i, login)`
-7. `_apply_interaction()` por linha filtrada
+**Fluxo de `build(interactions_csv, users_csv)`:**
 
-`build_and_export(...)` → grafo + registry + caminho GEXF.
+1. Carrega e valida `users.csv` — lança `InvalidCsvError` se o arquivo estiver ausente ou mal formatado
+2. Carrega `interactions.csv` linha por linha — cada linha é validada como objeto `Interaction`
+3. Chama `_filter_interactions()` — cada subclasse implementa o filtro por tipo
+4. Registra todos os logins no `UserRegistry`
+5. Instancia `AdjacencyListGraph(n)` com `n` = número de usuários únicos
+6. Chama `set_vertex_label(i, login)` para cada usuário registrado
+7. Para cada interação filtrada, chama `_apply_interaction()` — adiciona aresta e peso
 
-Fabricas: `list_graph_factory(n)` (padrão), `matrix_graph_factory(n)` (testes).
+O método `build_and_export(...)` executa o build e ainda serializa o resultado como GEXF no caminho configurado, retornando o grafo e o registry.
 
-### Arestas repetidas (G1–G3 vs G4)
-
-Grafo **simples**: no máximo uma aresta `src → dst`.
+**Comportamento com arestas repetidas:**
 
 | Builders | `accumulate_edge_weights` | Comportamento |
-|----------|---------------------------|---------------|
-| G1, G2, G3 | `False` | Primeira linha cria aresta; demais **ignoradas** |
-| G4 | `True` | Cada linha **soma** peso oficial do tipo |
+|----------|--------------------------|---------------|
+| G1, G2, G3 | `False` | Primeira linha cria a aresta com seu peso. Linhas subsequentes para o mesmo par são ignoradas. |
+| G4 | `True` | Cada linha soma o peso oficial do tipo ao peso já existente na aresta. |
 
-Exemplo: 3× `alice→bob` comentário → G1: uma aresta peso **2** · G4: peso **6** (2+2+2).
+Exemplo com 3 comentários de `alice → bob`: no G1 a aresta tem peso 2 (apenas a primeira interação). No G4 a aresta tem peso 6 (2 + 2 + 2, somando todas).
 
-Auto-interações descartadas na validação do CSV.
+### 4.5 `interaction_weights.py`
 
-## 3.5 `interaction_weights.py`
+Centraliza a tabela de pesos oficiais do enunciado. A função `official_weight(tipo)` é usada pelo G4 para garantir que o peso somado seja sempre o peso canônico do tipo, independente do valor que vier no campo `weight` do CSV.
 
-```python
-official_weight(tipo)  # centraliza pesos do PDF (+ close_issue=3)
-```
+### 4.6 `exceptions.py` (builder)
 
-G4 usa `official_weight`, não apenas o campo `weight` do CSV.
+| Exceção | Quando é lançada |
+|---------|------------------|
+| `BuilderError` | Classe base para erros da frente de builders |
+| `UnknownLoginError` | Tentativa de acessar índice de login não registrado no `UserRegistry` |
+| `UnknownIndexError` | Tentativa de acessar login de índice inexistente no `UserRegistry` |
+| `InvalidCsvError` | Arquivo ausente, coluna faltando ou linha com dados inválidos |
 
-## 3.6 `exceptions.py` (builder)
+### 4.7 Saída dos Builders
 
-| Exceção | Quando |
-|---------|--------|
-| `BuilderError` | base |
-| `UnknownLoginError` | login não registrado |
-| `UnknownIndexError` | índice inválido |
-| `InvalidCsvError` | arquivo ausente, coluna faltando, linha inválida |
+| Grafo | Arquivo GEXF gerado |
+|-------|---------------------|
+| G1 | `output/graphs/graph1_comments.gexf` |
+| G2 | `output/graphs/graph2_closures.gexf` |
+| G3 | `output/graphs/graph3_reviews.gexf` |
+| G4 | `output/graphs/graph4_integrated.gexf` |
 
-## 3.7 `run_build()` em `main.py`
+### 4.8 Testes F3
 
-Executa os quatro builders com `AdjacencyListGraph` e grava os `.gexf`. Import de mining é **lazy** — `--build` não exige token.
-
-## 3.8 Visualização
-
-GEXF abre no Gephi ou GrafoGen. Dataset `spec-kit` minerado: G1 tipicamente **~2100 vértices** e **~2700 arestas** (varia com a mineração).
-
-## 3.9 Testes F3
-
-Arquivo: `tests/test_builder.py` + `builder_test_helpers.py`
-
-- Filtro por tipo; agregação G4; exportação GEXF
-- Parametrização **lista + matriz**
-- Testes opcionais com `data/raw/` real
+Meta de cobertura: **>= 98%** em `src/builder/`. Cenários: filtro por tipo de interação, acumulação de pesos no G4, exportação GEXF, parametrização com lista e matriz, e testes opcionais com os CSVs reais de `data/raw/`.
 
 ```bash
 python -m pytest tests/test_builder.py -v
 python -m pytest tests/test_builder.py --cov=src.builder --cov-report=term-missing
 ```
 
-Meta: **≥ 98%** em `src/builder/`.
-
-## 3.10 Resumo rápido F3
-
-Responde: *"Como CSV vira grafo G1–G4?"*
-
-1. `UserRegistry` mapeia login ↔ índice
-2. Cada builder filtra tipos de interação
-3. `BaseBuilder` popula `AbstractGraph` e exporta GEXF
-4. G4 soma pesos oficiais por par `(src, dst)`
-
 ---
 
-# PARTE 4 — F4 Analysis
+## 5. F4 — Analysis (`src/analysis/`)
 
-**Pasta:** `src/analysis/` · **Entrada:** CSVs da F1 (reconstrói grafos via F3) · **Saída:** `output/reports/`
+**Responsável: Diogo Meireles**
 
-**Não lê `.gexf` diretamente.** `run_analysis()` instancia cada builder, monta o grafo em memória e calcula métricas.
+A frente de análise calcula métricas de centralidade, estrutura e comunidade sobre os grafos G1 a G4. Ela não lê os arquivos `.gexf` — reconstrói os grafos em memória chamando os próprios builders (F3) sobre os CSVs.
+
+### 5.1 Execução
 
 ```bash
 python -m src.app.main --analyze
 python -m src.app.main --analyze --output-dir data/raw --report-output-dir output/reports
 ```
 
-## 4.1 Arquivos
-
-```text
-src/analysis/
-├── centrality.py    # grau, betweenness, closeness, PageRank
-├── structure.py     # densidade, clustering, assortatividade
-└── community.py     # Louvain, modularidade, bridging ties
-```
-
-## 4.2 Algoritmos — `centrality.py`
+### 5.2 `centrality.py`
 
 | Função | Algoritmo | Normalização |
-|--------|-----------|--------------|
-| `degree_centrality(graph)` | grau in/out | ÷ `(n - 1)` |
-| `betweenness_centrality(graph)` | **Brandes** (BFS se pesos zero; Dijkstra se ponderado) | ÷ `(n-1)(n-2)` dirigido |
-| `closeness_centrality(graph)` | distâncias mínimas | inverso da soma das distâncias alcançáveis |
-| `pagerank(graph, damping=0.85)` | iteração de potência | nós pendentes distribuem rank; soma ≈ 1 |
+|--------|-----------|-------------|
+| `degree_centrality(graph)` | Grau de entrada e saída de cada vértice | Dividido por (n - 1) |
+| `betweenness_centrality(graph)` | Algoritmo de Brandes — BFS se pesos zero, Dijkstra se ponderado | Dividido por (n-1)(n-2) para grafos dirigidos |
+| `closeness_centrality(graph)` | Distâncias mínimas a partir de cada vértice | Inverso da soma das distâncias alcançáveis |
+| `pagerank(graph, damping=0.85)` | Iteração de potência com fator de amortecimento 0.85 | Nós pendentes distribuem rank; soma total aproxima 1 |
 
-## 4.3 Algoritmos — `structure.py`
+### 5.3 `structure.py`
 
 | Função | Fórmula / comportamento |
-|--------|-------------------------|
-| `density(graph)` | `\|E\| / (\|V\| × (\|V\| - 1))` |
-| `clustering_coefficient(graph)` | local por vértice + global (transitividade dirigida) → `{"local": {...}, "global": float}` |
-| `degree_assortativity(graph)` | Pearson entre grau de origem e destino das arestas |
+|--------|------------------------|
+| `density(graph)` | `\|E\| / (\|V\| × (\|V\| - 1))` — razão entre arestas existentes e arestas possíveis |
+| `clustering_coefficient(graph)` | Calcula coeficiente local por vértice (transitividade dirigida) e coeficiente global. Retorna dicionário com chaves `local` e `global`. |
+| `degree_assortativity(graph)` | Correlação de Pearson entre o grau de origem e destino de cada aresta. Positivo = usuários similares conectam-se mais. |
 
-## 4.4 Algoritmos — `community.py`
+### 5.4 `community.py`
 
 | Função | Comportamento |
-|--------|---------------|
-| `detect_communities(graph)` | **Louvain** dirigido (fase local + agregação) |
-| `modularity(graph, partition)` | Newman para grafo dirigido |
-| `bridging_ties(graph, partition)` | lista `(origem, destino, com_origem, com_destino)` inter-comunidade |
+|--------|--------------|
+| `detect_communities(graph)` | Algoritmo de Louvain para grafos dirigidos. Executa fase local (mover vértice para comunidade que maximize modularidade) e fase de agregação. Pesos zero são tratados como peso unitário. |
+| `modularity(graph, partition)` | Calcula a modularidade de Newman para grafos dirigidos dado um particionamento. |
+| `bridging_ties(graph, partition)` | Retorna lista de tuplas `(origem, destino, com_origem, com_destino)` para cada aresta que conecta comunidades diferentes. |
 
-Pesos zero tratados como peso unitário na detecção de comunidades.
+### 5.5 Fluxo de `run_analysis()`
 
-## 4.5 Fluxo de `run_analysis()`
+Para cada um dos quatro grafos (G1 a G4):
 
-Para cada `(G1..G4, Builder)`:
+1. Instancia o builder correspondente e chama `build()` para obter `(graph, registry)`
+2. Calcula todas as centralidades e adiciona as linhas em `centrality_rows`
+3. Calcula densidade, clustering e assortatividade e armazena em `structure_data`
+4. Executa Louvain, calcula modularidade e identifica `bridging_ties`
+5. Ao final, escreve os três arquivos de saída em `output/reports/`
 
-1. `builder.build()` → `(graph, registry)`
-2. Centralidades → linhas em `centrality_rows`
-3. Densidade, clustering, assortatividade → `structure_data[graph]`
-4. Louvain + modularidade + bridging → `structure_data` + `community_rows`
-5. Escreve três arquivos em `output/reports/`
+### 5.6 Schemas de Saída
 
-## 4.6 Schemas de saída
+| Arquivo | Colunas / campos |
+|---------|-----------------|
+| `centrality.csv` | `login`, `graph`, `degree_in`, `degree_out`, `betweenness`, `closeness`, `pagerank` (uma linha por usuário por grafo, valores com 6 casas decimais) |
+| `communities.csv` | `login`, `community_id`, `graph` (uma linha por usuário por grafo) |
+| `structure.json` | Por grafo: `density`, `clustering_coefficient_global`, `clustering_coefficient_local` (por login), `degree_assortativity`, `modularity`, `num_communities`, `num_bridging_ties` |
 
-### `centrality.csv`
+### 5.7 Testes F4
 
-```csv
-login,graph,degree_in,degree_out,betweenness,closeness,pagerank
-```
-
-Uma linha por `(login, graph)` com `graph ∈ {G1,G2,G3,G4}`. Valores com 6 casas decimais.
-
-### `structure.json`
-
-Por grafo: `density`, `clustering_coefficient_global`, `clustering_coefficient_local` (login→valor), `degree_assortativity`, `modularity`, `num_communities`, `num_bridging_ties`.
-
-### `communities.csv`
-
-```csv
-login,community_id,graph
-```
-
-## 4.7 Restrições
-
-- Sem networkx, igraph, etc.
-- Funciona com `AdjacencyListGraph` e `AdjacencyMatrixGraph`
-
-## 4.8 Testes F4
-
-Arquivo: `tests/test_analysis.py` — 88 testes
-
-Grafos de referência: estrela, ciclo, completo, desconectado, caminho. Propriedades conhecidas; PageRank soma ≈ 1; Louvain; bridging ties. Parametrização lista + matriz.
+88 testes usando grafos de referência com propriedades conhecidas: estrela, ciclo, completo, desconectado, caminho. Verificações: PageRank soma aproxima 1, Louvain retorna partição válida, bridging ties corretos. Parametrizados com lista e matriz.
 
 ```bash
 python -m pytest tests/test_analysis.py -v
 python -m pytest tests/test_analysis.py --cov=src.analysis -q
 ```
 
-Meta: **≥ 98%** em `src/analysis/`.
+---
 
-## 4.9 Resumo rápido F4
+## 6. F5 — Integração CLI (`src/app/main.py`)
 
-Responde: *"O que o grafo diz sobre a comunidade?"*
+**Responsável: Diogo Meireles**
 
-1. Reconstrói G1–G4 dos mesmos CSVs
-2. Mede centralidade (grau, intermedição, proximidade, PageRank)
-3. Mede estrutura (densidade, clustering, assortatividade)
-4. Detecta comunidades (Louvain) e elos entre elas (bridging ties)
-5. Exporta CSV/JSON para relatório e GrafoGen
+O `main.py` é o ponto de entrada da linha de comando. Orquestra as frentes F1, F3 e F4 sem misturar responsabilidades entre elas. O import da F1 é feito de forma lazy (somente quando `--mine` é usado) para que `--build` e `--analyze` funcionem sem o token da API.
+
+### 6.1 Flags Disponíveis
+
+| Flag | Função chamada | Observação |
+|------|---------------|------------|
+| `--mine` | `run_mining()` | Precisa de `GITHUB_TOKEN` no ambiente |
+| `--build` | `run_build()` | Só precisa dos CSVs em `data/raw/` |
+| `--analyze` | `run_analysis()` | Só precisa dos CSVs em `data/raw/` |
+| `--all` | `mine → build → analyze` | Executa pipeline completo |
+
+### 6.2 Argumentos Opcionais
+
+| Argumento | Padrão | Afeta |
+|-----------|--------|-------|
+| `--repo` | `github/spec-kit` | Repositório minerado pela F1 |
+| `--output-dir` | `data/raw` | Onde F1 grava e F3/F4 leem os CSVs |
+| `--graph-output-dir` | `output/graphs` | Onde F3 grava os GEXF |
+| `--report-output-dir` | `output/reports` | Onde F4 grava os relatórios |
 
 ---
 
-# PARTE 5 — F5 Integração e GrafoGen
+## 7. F5.5 — GrafoGen Frontend (`frontend-grafogen/`)
 
-## 5.1 F5 — `src/app/main.py` (CLI)
+**Responsável: Matheus Felipe**
 
-**Responsável:** Diogo Meireles
+SPA que detecta o estado atual do pipeline, permite executar cada etapa Python via browser, visualiza os quatro grafos de forma interativa e exibe métricas de centralidade.
 
-Orquestra as frentes sem misturar responsabilidades:
-
-| Flag | Função | Import lazy |
-|------|--------|-------------|
-| `--mine` | `run_mining()` — F1 | sim (exige `dotenv`/token) |
-| `--build` | `run_build()` — F3, grava 4 GEXF | não |
-| `--analyze` | `run_analysis()` — F4, grava relatórios | não |
-| `--all` | mine → build → analyze | sim na etapa mine |
-
-Argumentos úteis: `--repo`, `--output-dir`, `--graph-output-dir`, `--report-output-dir`.
-
-`api_demo.py` (exigência Etapa 2): aplica **todas** as operações da API em grafo de 3 vértices (matriz + lista) e gera `output/demo/graph_demo.gexf`.
-
-## 5.2 F5.5 — GrafoGen (`frontend-grafogen/`)
-
-**Responsável:** Matheus Felipe
-
-SPA que complementa o Gephi: detecta estado do pipeline, executa etapas Python, visualiza G1–G4 e exibe métricas de centralidade.
-
-### Estrutura do projeto
-
-```text
-frontend-grafogen/
-├── server/index.js              # API Express (porta 3001)
-├── src/
-│   ├── App.tsx                  # rotas React Router
-│   ├── pages/
-│   │   ├── HomePage.tsx         # pipeline + cards G1–G4
-│   │   └── VisualizePage.tsx    # canvas + sidebar
-│   ├── components/
-│   │   ├── graph/               # GraphCanvas, GraphSidebar, ExportModal, MetricsPanel, ZoomControls
-│   │   ├── home/GraphTypeCard.tsx
-│   │   ├── pipeline/            # PipelineCard, LogsModal
-│   │   └── layout/Navbar.tsx
-│   ├── stores/                  # graphStore, pipelineStore, uiStore (Zustand)
-│   ├── hooks/usePipelineStatus.ts
-│   └── utils/                   # api.ts, gexfParser.ts, graphExporter.ts, graphOptions.ts
-├── vite.config.ts               # proxy /api → :3001
-└── package.json
-```
-
-### Stack
+### 7.1 Stack Tecnológica
 
 | Camada | Tecnologia |
-|--------|------------|
+|--------|-----------|
 | UI | React 19 + TypeScript + Vite 8 |
 | Estilo | Tailwind CSS 4 |
-| Grafo | vis-network (canvas) |
-| Estado | Zustand 5 |
-| Rotas | React Router 7 |
+| Visualização de grafo | vis-network (canvas WebGL) |
+| Gerenciamento de estado | Zustand 5 |
+| Roteamento | React Router 7 |
 | API local | Express 5 (Node.js) |
-| Orquestração | `spawn('python', ['-m', 'src.app.main', '--{stage}'])` |
+| Orquestração Python | `spawn('python', ['-m', 'src.app.main', '--{stage}'])` |
 
-### Como rodar
+### 7.2 Como Rodar
 
 ```bash
 cd frontend-grafogen
 npm install
-npm run dev          # concurrently: API + Vite
+npm run dev   # inicia API Express (3001) + Vite (5173) em paralelo
 ```
 
-| URL / porta | Serviço |
-|-------------|---------|
-| http://localhost:5173 | Frontend Vite |
-| http://localhost:3001 | API Express (`API_PORT` opcional) |
+Pré-requisitos: Node 18+, Python 3.10+ com `requirements.txt` instalado. Os dados de `data/raw/` e `output/` são opcionais — o frontend detecta automaticamente quais etapas já foram executadas.
 
-Scripts: `dev:web` (só Vite), `dev:api` (só Express), `build` (produção).
-
-**Pré-requisitos:** Node 18+; Python 3.10+ com `requirements.txt` do backend; dados opcionais em `github-graph-analyzer/data/raw/` e `output/`.
-
-### Arquitetura runtime
-
-```text
-Browser (:5173)  ──/api/* (proxy Vite)──►  Express (:3001)
-                                                │
-                    ┌───────────────────────────┼───────────────────────────┐
-                    │ spawn python            │ leitura FS                  │
-                    ▼                         ▼                             │
-            src.app.main                 data/raw/                          │
-            --mine|--build|--analyze     output/graphs/*.gexf               │
-                                         output/reports/*                    │
-```
-
-`BACKEND_ROOT` em `server/index.js` resolve para `../../github-graph-analyzer` (caminho relativo ao `server/`).
-
-### API Express (`/api`)
+### 7.3 API Express (`/api`)
 
 | Método | Rota | Comportamento |
-|--------|------|---------------|
-| GET | `/status` | Estado do pipeline (poll a cada 3s na Home via `usePipelineStatus`) |
-| GET | `/graphs/:type` | GEXF XML; `:type` ∈ `{G1,G2,G3,G4}` |
-| GET | `/reports/:name` | `centrality.csv`, `communities.csv` ou `structure.json` |
-| POST | `/pipeline/:stage` | `mine`, `build` ou `analyze`; 409 se já houver processo |
-| POST | `/pipeline/cancel` | `SIGTERM` no processo ativo |
+|--------|------|--------------|
+| `GET` | `/status` | Estado do pipeline. Verificado a cada 3s pela Home via polling. Indica quais etapas foram concluídas. |
+| `GET` | `/graphs/:type` | Retorna o GEXF XML. `:type` aceita `G1`, `G2`, `G3` ou `G4`. |
+| `GET` | `/reports/:name` | Retorna `centrality.csv`, `communities.csv` ou `structure.json`. |
+| `POST` | `/pipeline/:stage` | Dispara `mine`, `build` ou `analyze`. Retorna 409 se já há processo rodando. |
+| `POST` | `/pipeline/cancel` | Envia SIGTERM para o processo Python ativo. |
 
-**Mapeamento GEXF** (igual aos builders F3):
+**Detecção de Status do Pipeline:**
 
-| Tipo | Arquivo |
-|------|---------|
-| G1 | `graph1_comments.gexf` |
-| G2 | `graph2_closures.gexf` |
-| G3 | `graph3_reviews.gexf` |
-| G4 | `graph4_integrated.gexf` |
+| Campo em `/status` | Critério de verificação |
+|--------------------|------------------------|
+| `stage1Complete` | Existem `data/raw/users.csv` e `data/raw/interactions.csv` |
+| `stage2Complete` | Os 4 arquivos GEXF existem em `output/graphs/` |
+| `stage3Complete` | Existem `centrality.csv` e `communities.csv` em `output/reports/` |
+| `interactionCount` | Número de linhas de `interactions.csv` menos o cabeçalho |
 
-**Detecção de etapas em `/status`:**
-
-| Campo | Critério no código |
-|-------|-------------------|
-| `stage1Complete` | existem `data/raw/users.csv` e `interactions.csv` |
-| `stage2Complete` | os 4 GEXF existem |
-| `stage3Complete` | existem `centrality.csv` **e** `communities.csv` em `output/reports/` |
-| `metricsAvailable` | igual a `stage3Complete` |
-| `interactionCount` | linhas de `interactions.csv` menos cabeçalho |
-
-Logs da execução Python ficam em `logs` (últimas 200 linhas).
-
-### Rotas e telas (React)
+### 7.4 Rotas React
 
 | Rota | Componente | Função |
-|------|------------|--------|
-| `/` | `HomePage` | Cards do pipeline (mine → build → analyze), logs, cards G1–G4 |
-| `/visualize/:graphId` | `VisualizePage` | Visualização (`graphId` = `G1`…`G4`) |
+|------|-----------|--------|
+| `/` | `HomePage` | Cards do pipeline (mine → build → analyze), logs de execução, cards G1–G4 disponíveis |
+| `/visualize/:graphId` | `VisualizePage` | Visualização interativa do grafo. `graphId` aceita `G1`, `G2`, `G3` ou `G4`. |
 
-**Home:** ao clicar em card de grafo disponível → `fetchGraphGexf` → `parseGEXF` → `navigate('/visualize/G1')` (etc.). Após `--analyze`, carrega `centrality.csv` no store. Há também **importação de GEXF** (upload com seletor de tipo) e lista de **grafos recentes** (`localStorage`).
-
-**Visualize:** se o grafo já está em memória, reutiliza; senão busca GEXF na API (ou cache de upload). Carrega `centrality.csv` e `communities.csv` para métricas e coloração.
-
-### Componentes principais
+### 7.5 Componentes Principais
 
 | Componente | Função |
-|------------|--------|
-| `GraphCanvas` | Vis-Network; filtro `minWeight`; destaque na busca; cores por comunidade; foco animado no vértice |
-| `GraphSidebar` | Troca de grafo, busca/foco por login (Enter), slider de peso mínimo (G4), exportar/métricas |
-| `MetricsPanel` | Top 10 por **pagerank**, **betweenness**, **degree_in** ou **closeness**; toggle colorir por comunidade |
-| `ExportModal` | PNG (1920×1080 ou 3840×2160), **SVG** vetorial ou DOT |
-| `ZoomControls` | Zoom in/out e fit |
-| `PipelineCard` + `LogsModal` | Disparo e acompanhamento das etapas Python |
+|-----------|--------|
+| `GraphCanvas` | Renderiza o grafo com vis-network. Suporta filtro por peso mínimo (`minWeight`), destaque de nós na busca, coloração por comunidade e foco animado em vértice específico. |
+| `GraphSidebar` | Troca de grafo, campo de busca por login (foco ao pressionar Enter), slider de peso mínimo (G4), botões de exportar e métricas. |
+| `MetricsPanel` | Exibe top 10 usuários por pagerank, betweenness, degree_in ou closeness. Permite toggle de coloração por comunidade. |
+| `ExportModal` | Exporta o grafo como PNG (1920x1080 ou 3840x2160), SVG vetorial ou formato DOT. |
+| `ZoomControls` | Botões de zoom in, zoom out e fit (centraliza o grafo na tela). |
+| `PipelineCard + LogsModal` | Dispara cada etapa do pipeline Python e exibe os logs de execução em tempo real. |
 
-### `gexfParser.ts`
+### 7.6 `gexfParser.ts`
 
-Converte GEXF 1.3 (saída de `gephi_exporter.py`) para o modelo interno:
+Converte o GEXF 1.3 gerado por `gephi_exporter.py` (F2) para o modelo interno do frontend. Cada nó vira um objeto com `id` (índice) e `label` (login). Cada aresta vira um objeto com `source`, `target` e `weight`. Para G1–G3, o peso padrão é 1 se o atributo estiver ausente; para G4, é 0 até a leitura do atributo.
 
-- **Nó:** `id` (índice), `label` (login)
-- **Aresta:** `source`, `target`, `weight` (atributo GEXF `for="0"`)
-- G1–G3: peso default 1 se ausente; G4: default 0 até ler atributo
+A função `parseCSVMetrics(csv)` converte o `centrality.csv` em uma lista de objetos com os campos `login`, `graph`, `degree_in`, `degree_out`, `betweenness`, `closeness` e `pagerank`, armazenados no `graphStore`.
 
-`parseCSVMetrics(csv)` → lista para `graphStore.metrics` (campos: login, graph, degree_in, degree_out, betweenness, closeness, pagerank).
+### 7.7 Regras de Performance (`graphOptions.ts`)
 
-### `graphOptions.ts` — regras de performance
+| Condição | Comportamento aplicado |
+|----------|----------------------|
+| <= 500 vértices | Labels visíveis diretamente no canvas |
+| > 500 vértices | Labels ocultos; exibidos como tooltip no hover |
+| <= 1000 vértices | Física vis-network habilitada (forceAtlas2Based) |
+| > 1000 vértices | Física desligada (layout estático para performance) |
+| Tamanho do nó | 16px com <= 500 vértices; 8px com > 500 |
+| Largura da aresta | Proporcional a `log(weight + 1)` |
 
-| Vértices | Comportamento |
-|----------|---------------|
-| ≤ 500 | labels visíveis no canvas |
-| > 500 | labels ocultos; **tooltip** (`title`) no hover |
-| ≤ 1000 | física Vis-Network habilitada (`forceAtlas2Based`) |
-| > 1000 | física **desligada** |
+### 7.8 Integração com as Frentes
 
-Tamanho do nó: 16 px (≤500 vértices) ou 8 px (>500). Largura da aresta proporcional a `log(weight+1)` no canvas.
-
-### Cliente `api.ts`
-
-- `fetchStatus()`, `fetchGraphGexf(type)`, `fetchReport(name)`
-- `runPipelineStage('mine'|'build'|'analyze')`, `cancelPipeline()`
-
-### Integração com F1–F4
-
-| Frente | Artefato consumido |
-|--------|-------------------|
-| F1 | `users.csv`, `interactions.csv` (status etapa 1) |
-| F3 | `output/graphs/*.gexf` (visualização) |
-| F4 | `centrality.csv` (métricas) e `communities.csv` (coloração); `structure.json` exposto pela API |
-
-### Limitações conhecidas (código atual)
-
-| Item | Status |
-|------|--------|
-| `structure.json` na UI | não consumido (disponível via `GET /api/reports/structure.json`) |
-| Persistência de posições do layout | não salva entre sessões (física Vis-Network recalcula) |
-| Upload GEXF muito grande | cache em `localStorage` pode falhar por quota do navegador |
-
-### Resumo rápido F5 / GrafoGen
-
-- **F5:** `main.py` liga F1+F3+F4 na linha de comando.
-- **GrafoGen:** mesma pipeline via browser; lê GEXF e `centrality.csv`; interface mínima exigida pela Etapa 2, estendida para estudo visual do caso `spec-kit`.
+| Frente | Artefato consumido pelo GrafoGen |
+|--------|----------------------------------|
+| F1 | `users.csv` e `interactions.csv` (para verificar `stage1Complete`) |
+| F3 | `output/graphs/*.gexf` (visualização dos grafos) |
+| F4 | `centrality.csv` (métricas), `communities.csv` (coloração por comunidade), `structure.json` |
 
 ---
 
-# Anexo — Comandos e checklists
+## 8. Fluxo Completo: da API ao Grafo
 
-## Comandos de teste por frente
+### Etapa 1 — Mineração (F1)
+
+1. `GitHubClient` autentica com o token do `.env`
+2. `IssueMiner` percorre todas as issues via `get_issues(state='all')`, filtrando PRs
+3. Para cada issue: extrai comentários (`comment_issue` + `open_issue_commented`) e fechamentos (`close_issue`)
+4. `PRMiner` percorre todos os PRs via `get_pulls(state='all')`
+5. Para cada PR: extrai comentários gerais, comentários em linha de código, reviews e merges
+6. Cada interação entre usuários distintos vira um objeto `Interaction`
+7. `DataExporter` grava `users.csv`, `interactions.csv` e `events.csv` em `data/raw/`
+
+### Etapa 2 — Build dos Grafos (F3)
+
+1. `BaseBuilder` carrega `users.csv` → `UserRegistry` atribui índice `0..n-1` a cada login
+2. `interactions.csv` é lido linha por linha
+3. Cada builder filtra as linhas pelo campo `type`
+4. Para cada interação filtrada: `add_edge(src_idx, dst_idx)` + `set_edge_weight(src_idx, dst_idx, peso)`
+5. G4 acumula pesos; G1–G3 usam apenas a primeira ocorrência de cada par
+6. `export_to_gephi()` serializa cada grafo como GEXF 1.3 em `output/graphs/`
+
+### Etapa 3 — Análise (F4)
+
+1. `run_analysis()` reconstrói cada grafo em memória chamando os builders novamente
+2. Para cada grafo: `degree_centrality`, `betweenness_centrality`, `closeness_centrality` e `pagerank`
+3. Para cada grafo: `density`, `clustering_coefficient` e `degree_assortativity`
+4. Para cada grafo: `detect_communities` (Louvain), `modularity` e `bridging_ties`
+5. Resultados salvos em `output/reports/`
+
+### Etapa 4 — Visualização (F5.5)
+
+1. Frontend detecta `stage1Complete`, `stage2Complete` e `stage3Complete` via polling em `/api/status`
+2. Usuário clica em um card de grafo → `fetchGraphGexf(G1)` busca o GEXF via `/api/graphs/G1`
+3. `gexfParser.ts` converte o GEXF em nós e arestas para o vis-network
+4. Se `stage3Complete`, `centrality.csv` é carregado e métricas ficam disponíveis no `MetricsPanel`
+5. `communities.csv` habilita a coloração por comunidade no `GraphCanvas`
+6. Usuário pode filtrar arestas por peso mínimo, buscar usuários, exportar o grafo e navegar entre G1–G4
+
+---
+
+## 9. Comandos de Referência
+
+### Pipeline
 
 ```bash
-pytest tests/test_mining.py -q
-pytest tests/test_graph_matrix.py tests/test_graph_list.py -q
-pytest tests/test_builder.py -q
-pytest tests/test_analysis.py -q
-pytest tests/ -q                    # todos (290+ testes; ≥98% em src/ via pytest.ini)
-pytest --cov=src tests/             # cobertura backend (~99%)
-
-cd ../frontend-grafogen
-npm test                            # Vitest — parsers, export, comunidades, recentes
-npm run test:coverage               # meta ≥ 90% em src/utils/
+python -m src.app.main --mine                    # Mineração
+python -m src.app.main --build                   # Build dos grafos
+python -m src.app.main --analyze                 # Análise
+python -m src.app.main --all                     # Pipeline completo
+python -m src.app.api_demo                       # Demo da API de grafos (F2)
+cd frontend-grafogen && npm run dev              # GrafoGen em localhost:5173
 ```
 
-## Checklists de entrega
+### Testes
 
-### F1 — Mining
-- [x] `GitHubClient` (auth, rate limit, retry)
-- [x] `IssueMiner` + `PRMiner` → `Interaction`
-- [x] `users.csv`, `interactions.csv`, `events.csv`
-- [x] Filtro PRs na API de issues; sem auto-interações
-- [x] CLI `--mine`
-- [x] Testes com mocks
+```bash
+pytest tests/test_mining.py -q                                            # F1
+pytest tests/test_graph_matrix.py tests/test_graph_list.py -q            # F2
+pytest tests/test_builder.py -q                                           # F3
+pytest tests/test_analysis.py -q                                          # F4
+pytest tests/ -q                                                          # Todos (~290 testes)
+pytest --cov=src tests/                                                   # Cobertura geral (~99%)
+npm test            # (em frontend-grafogen/) Vitest
+npm run test:coverage                                                     # Cobertura frontend
+```
 
-### F2 — Graph
-- [x] `AbstractGraph` + matriz + lista
-- [x] API Etapa 2 completa + rótulos
-- [x] Exceções; `add_edge` idempotente
-- [x] GEXF 1.3; `api_demo.py`
-- [x] Testes ≥ 98%
+### Metas de Cobertura
 
-### F3 — Builders
-- [x] `UserRegistry` + `BaseBuilder`
-- [x] G1, G2, G3, G4 + exportação GEXF
-- [x] CLI `--build`
-- [x] Testes ≥ 98%
-
-### F4 — Analysis
-- [x] Todas as métricas do enunciado
-- [x] Relatórios em `output/reports/`
-- [x] CLI `--analyze`
-- [x] Testes com grafos de referência
-
-### F5 — Integração
-- [x] CLI `--mine`, `--build`, `--analyze`, `--all`
-- [x] `api_demo.py` demonstrando toda API do grafo
-- [x] Testes em `tests/test_app.py` (pipeline CLI + demo)
-
-### F5.5 — GrafoGen
-- [x] SPA Home + Visualize
-- [x] API Express + spawn Python
-- [x] Vis-Network, export PNG/SVG/DOT, métricas (centrality + closeness)
-- [x] Coloração por comunidade, foco em vértice, upload GEXF, histórico recente
-- [x] Testes Vitest em `src/utils/` (cobertura ≥ 90%)
-
-## Outros materiais
-
-- [diagramas/](./diagramas/) — UML PlantUML + PNG
-- [tp-es.pdf](../Orientação%20Trabalho/tp-es.pdf) — enunciado oficial
+| Frente | Meta |
+|--------|------|
+| F1 — `src/mining/` | >= 98% |
+| F2 — `src/graph/` | >= 98% |
+| F3 — `src/builder/` | >= 98% |
+| F4 — `src/analysis/` | >= 98% |
+| F5.5 — `src/utils/` (frontend) | >= 90% |
