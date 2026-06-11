@@ -248,30 +248,21 @@ AbstractGraph  ←  classe base abstrata
 O AbstractGraph define o contrato — todas as funções que qualquer implementação precisa ter. As duas subclasses implementam isso de formas diferentes internamente, mas produzem o mesmo resultado.
 - Classe base que centraliza o contrato da API, validações comuns, contagem de vértices e arestas, pesos e rótulos de vértices e exportação GEXF. Ambas as implementações herdam desta classe.
 
-  | Método | O que faz |
-|--------|-----------|
-| `get_vertex_count()` | Retorna `n`, o número de vértices do grafo |
-| `get_edge_count()` | Retorna o número de arestas existentes |
-| `has_edge(u, v)` | Verifica se existe a aresta `u → v` |
-| `add_edge(u, v)` | Cria a aresta `u → v` com peso `0.0`. Idempotente: chamadas repetidas não têm efeito |
-| `remove_edge(u, v)` | Remove a aresta `u → v`. Lança `EdgeNotFoundError` se não existir |
-| `is_successor(u, v)` | Retorna `True` se existe `u → v` (v é sucessor de u) |
-| `is_predecessor(u, v)` | Retorna `True` se existe `u → v` (u é predecessor de v) |
-| `is_divergent(u1,v1,u2,v2)` | `True` se `u1 == u2` e ambas as arestas existem (mesma origem) |
-| `is_convergent(u1,v1,u2,v2)` | `True` se `v1 == v2` e ambas as arestas existem (mesmo destino) |
-| `is_incident(u, v, x)` | `True` se `x` é `u` ou `x` é `v` (x é extremo da aresta u→v) |
-| `get_vertex_in_degree(u)` | Retorna quantas arestas chegam em `u` |
-| `get_vertex_out_degree(u)` | Retorna quantas arestas saem de `u` |
-| `set_vertex_weight(v, w)` | Define o peso do vértice `v` |
-| `get_vertex_weight(v)` | Retorna o peso do vértice `v` |
-| `set_edge_weight(u, v, w)` | Define o peso da aresta `u → v` |
-| `get_edge_weight(u, v)` | Retorna o peso da aresta `u → v`. Lança `EdgeNotFoundError` se não existir |
-| `set_vertex_label(v, label)` | Associa um rótulo de texto (ex: login) ao vértice `v` |
-| `get_vertex_label(v)` | Retorna o rótulo do vértice `v` |
-| `is_connected()` | `True` se o grafo é fracamente conectado (existe caminho ignorando direção) |
-| `is_empty_graph()` | `True` se não há arestas |
-| `is_complete_graph()` | `True` se todo par ordenado (u,v) com u != v possui aresta |
-| `export_to_gephi(path)` | Serializa o grafo como GEXF 1.3 no caminho especificado |
+  ### API obrigatória (Etapa 2)
+
+```text
+get_vertex_count()          get_edge_count()
+has_edge(u, v)              add_edge(u, v)              remove_edge(u, v)
+is_successor(u, v)          is_predecessor(u, v)
+is_divergent(u1,v1,u2,v2)   is_convergent(u1,v1,u2,v2)
+is_incident(u, v, x)
+get_vertex_in_degree(u)     get_vertex_out_degree(u)
+set_vertex_weight(v, w)     get_vertex_weight(v)
+set_edge_weight(u, v, w)    get_edge_weight(u, v)
+is_connected()              is_empty_graph()          is_complete_graph()
+export_to_gephi(path)
+set_vertex_label(v, label)  get_vertex_label(v)       # extras alinhados ao PDF
+```
   
 ### 3.2 `exceptions.py`
 
