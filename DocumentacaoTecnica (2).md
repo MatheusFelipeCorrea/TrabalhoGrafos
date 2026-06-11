@@ -129,20 +129,9 @@ python -m src.app.main --mine --repo github/spec-kit
 
 Se `--repo` for omitido, o padrão já é `github/spec-kit`.
 
-### 2.3 Fluxo de `run_mining()` (`main.py`)
+### 2.3 Arquivos e Classes
 
-1. Criar `GitHubClient` - Encapsula acesso ao GitHub com retry e rate limit.
-2. Criar `IssueMiner` e `PRMiner`
-3. `issue_miner.mine(repo)` → lista de `Interaction`
-4. `pr_miner.mine(repo)` → lista de `Interaction`
-5. Juntar interações e eventos brutos
-6. `users_from_interactions()` → lista de usuários
-7. `DataExporter` grava os três CSVs
-8. Imprime estatísticas (`scanned_items`, `mined_issues`, `skipped_pull_requests`)
-
-### 2.4 Arquivos e Classes
-
-### 2.5 `interaction_model.py`
+### 2.4 `interaction_model.py`
 
 #### `Interaction` — vira aresta de grafo
 
@@ -174,7 +163,7 @@ A Interaction já é o dado processado: extraiu origem, destino, calculou o peso
 
 `MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
 
-### 2.6 `issue_miner.py` — `IssueMiner`
+### 2.5 `issue_miner.py` — `IssueMiner`
 
 #### Por que filtrar PRs na API de issues?
 
@@ -204,7 +193,7 @@ Usa `repo.get_pulls(state='all')` e extrai interações de cada PR via `_extract
 | Merge pelo próprio autor | `pr_merged` | Evento sim, aresta não (evita laço no grafo) |
 
 
-### 2.7 Schemas dos CSVs (contrato com F3)
+### 2.6 Schemas dos CSVs (contrato com F3)
 
 #### `users.csv`
 
@@ -224,7 +213,7 @@ src_login,dst_login,type,weight,timestamp,source_id
 event_type,actor_login,target_login,source_kind,source_id,timestamp,state
 ```
 
-### 2.8 Fluxo Completo de `run_mining()`
+### 2.7 Fluxo Completo de `run_mining()`
 
 1. Criação do `GitHubClient` com o token do ambiente
 2. Criação das instâncias de `IssueMiner` e `PRMiner`
@@ -235,7 +224,7 @@ event_type,actor_login,target_login,source_kind,source_id,timestamp,state
 7. `DataExporter` grava os três CSVs em `data/raw/`
 8. Estatísticas são impressas no terminal
 
-### 2.9 Testes F1
+### 2.8 Testes F1
 
 Meta de cobertura: **>= 98%** em `src/mining/`. Cenários cobertos: mineração completa com mocks, filtro de PRs na API de issues, validações de `Interaction` e `MiningEvent`, retry exponencial, exportação CSV e repositório com formato inválido.
 
