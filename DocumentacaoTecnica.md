@@ -152,24 +152,26 @@ Usa `repo.get_pulls(state='all')` e extrai interações de cada PR via `_extract
 | Merge por outra pessoa | `pr_merged` | `merged_by → author` (`merge_pr`, peso 5) |
 | Merge pelo próprio autor | `pr_merged` | Evento sim, aresta não (evita laço no grafo) |
 
-#### `data_exporter.py` — `DataExporter`
 
-| Método | Arquivo gerado | Observação |
-|--------|---------------|------------|
-| `export_users_csv(users)` | `data/raw/users.csv` | Deduplica por login, ordena alfabeticamente |
-| `export_interactions_csv(interactions)` | `data/raw/interactions.csv` | Usa `Interaction.to_row()` em cada objeto |
-| `export_events_csv(events)` | `data/raw/events.csv` | Usa `MiningEvent.to_row()` em cada objeto |
-| `users_from_interactions(interactions, events)` | (lista em memória) | Extrai todos os logins únicos de interações e eventos |
+## 1.9 Schemas dos CSVs (contrato com F3)
 
-### 2.4 Schemas dos CSVs (Contrato com F3)
+### `users.csv`
 
-| Arquivo | Colunas |
-|---------|---------|
-| `users.csv` | `login`, `user_id`, `name` |
-| `interactions.csv` | `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id` |
-| `events.csv` | `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state` |
+```csv
+login,user_id,name
+```
 
-`interactions.csv` não tem uma linha por issue, mas sim uma linha por interação ocorrida (cada comentário, fechamento etc. gera entradas separadas). O campo `source_id` é o número da issue ou PR, não uma contagem sequencial.
+### `interactions.csv`
+
+```csv
+src_login,dst_login,type,weight,timestamp,source_id
+```
+
+### `events.csv`
+
+```csv
+event_type,actor_login,target_login,source_kind,source_id,timestamp,state
+```
 
 ### 2.5 Fluxo Completo de `run_mining()`
 
