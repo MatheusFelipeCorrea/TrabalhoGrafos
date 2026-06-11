@@ -1,106 +1,43 @@
 # Documentação Técnica — GitHub Graph Analyzer
 
-Documento **único** do projeto para estudo do caso e leitura em grupo. Descreve **o que cada frente faz**, **como faz** e **como se conecta** às demais — alinhado ao código em `github-graph-analyzer/` e `frontend-grafogen/`.
+## 1. Visão Geral do Projeto
 
-**Repositório analisado:** `github/spec-kit`
+O GitHub Graph Analyzer é uma ferramenta acadêmica que minera dados de colaboração de um repositório GitHub e os representa como grafos direcionados ponderados. A análise cobre comentários em issues, fechamentos, revisões de pull requests e merges — transformando atividade social em estruturas de grafo analisáveis.
 
-| Frente | Responsável | Pasta |
-|--------|-------------|-------|
-| F1 — Mining | Arthur Henrique | `src/mining/` |
-| F2 — Graph Structures | Matheus Felipe | `src/graph/` |
-| F3 — Builders | Alice Shikida | `src/builder/` |
-| F4 — Analysis | Diogo Meireles | `src/analysis/` |
-| F5 — Integração (CLI) | Diogo Meireles | `src/app/main.py`, `src/app/api_demo.py` |
-| F5.5 — Frontend (GrafoGen) | Matheus Felipe | `frontend-grafogen/` |
+O repositório analisado é o `github/spec-kit`. Todo o pipeline é executado localmente, sem dependência de bibliotecas externas de grafos (networkx, igraph etc. são proibidos pelo enunciado).
 
----
+### 1.1 Fluxo Geral de Dados
 
-## Índice
+| Etapa | Comando CLI | Entrada | Saída |
+|-------|-------------|---------|-------|
+| Mineração (F1) | `--mine` | GitHub API | `users.csv`, `interactions.csv`, `events.csv` |
+| Build dos grafos (F3) | `--build` | CSVs de `data/raw/` | 4 arquivos `.gexf` em `output/graphs/` |
+| Análise (F4) | `--analyze` | CSVs de `data/raw/` | `centrality.csv`, `communities.csv`, `structure.json` |
+| Frontend (F5.5) | `npm run dev` | GEXF + CSVs de métricas | Visualização interativa no browser |
 
-1. [Panorama do pipeline](#1-panorama-do-pipeline)
-2. [PARTE 1 — F1 Mining](#parte-1--f1-mining)
-3. [PARTE 2 — F2 Graph Structures](#parte-2--f2-graph-structures)
-4. [PARTE 3 — F3 Builders](#parte-3--f3-builders)
-5. [PARTE 4 — F4 Analysis](#parte-4--f4-analysis)
-6. [PARTE 5 — F5 Integração e GrafoGen](#parte-5--f5-integração-e-grafogen)
-7. [Anexo — Comandos e checklists](#anexo--comandos-e-checklists)
+A F2 (Graph Structures) não aparece como etapa separada na CLI — ela é a biblioteca de grafos que as frentes F3 e F4 usam internamente. O comando `--all` executa `mine → build → analyze` em sequência.
 
----
+### 1.2 Os Quatro Grafos
 
-## 1. Panorama do pipeline
+| Grafo | O que modela | Tipos de interação usados |
+|-------|-------------|--------------------------|
+| G1 — Comentários | Quem comentou na issue/PR de quem | `comment_issue`, `comment_pr` |
+| G2 — Fechamentos | Quem fechou a issue de quem | `close_issue` |
+| G3 — Revisões | Quem revisou/aprovou/mergeu o PR de quem | `review_pr`, `merge_pr` |
+| G4 — Integrado | Combinação ponderada de todos os tipos | Todos os tipos válidos (soma de pesos) |
 
-### 1.1 Fluxo de dados
+Em todos os grafos, uma aresta A → B significa que o usuário A realizou uma ação sobre um artefato do usuário B. Os grafos são direcionados, simples (sem laços, sem multi-arestas) e os vértices são indexados de 0 a n-1.
 
-```text
-GitHub API
-    │
-    ▼  --mine
-[F1 Mining]  →  data/raw/users.csv
-              →  data/raw/interactions.csv
-              →  data/raw/events.csv
-    │
-    ▼  --build
-[F3 Builders]  →  output/graphs/graph1_comments.gexf   (G1)
-              →  output/graphs/graph2_closures.gexf    (G2)
-              →  output/graphs/graph3_reviews.gexf      (G3)
-              →  output/graphs/graph4_integrated.gexf  (G4)
-    │              (usa API da F2 em memória)
-    ▼  --analyze
-[F4 Analysis]  →  output/reports/centrality.csv
-              →  output/reports/structure.json
-              →  output/reports/communities.csv
-    │
-    ▼  leitura via API / GEXF
-[F5.5 GrafoGen]  →  visualização web (Vis-Network) + orquestração do pipeline
-```
+### 1.3 Pesos Oficiais das Interações
 
-A **F2** não aparece como etapa separada na CLI: é a biblioteca de grafos usada pela F3 e F4.
-
-A **F5** (`main.py`) expõe `--mine`, `--build`, `--analyze` e `--all`. O **GrafoGen** chama os mesmos comandos via `spawn` do Python.
-
-### 1.2 Comandos principais
-
-```bash
-python -m src.app.main --mine      # F1 — chama GitHub API
-python -m src.app.main --build     # F3 — lê CSVs, gera GEXF
-python -m src.app.main --analyze   # F4 — lê CSVs, gera relatórios
-python -m src.app.main --all       # pipeline completo
-python -m src.app.api_demo         # demo de toda API do grafo (F2)
-
-cd ../frontend-grafogen && npm run dev   # GrafoGen (F5.5) — :5173 + API :3001
-```
-
-> Se `data/raw/interactions.csv` e `users.csv` já existem, **não é necessário** rodar `--mine` de novo para `--build`, `--analyze` ou o GrafoGen.
-
-### 1.3 Contratos entre frentes
-
-| De → Para | Artefato | Colunas / formato |
-|-----------|----------|-------------------|
-| F1 → F3 | `users.csv` | `login`, `user_id`, `name` |
-| F1 → F3 | `interactions.csv` | `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id` |
-| F3 → F4 | (em memória) | `AbstractGraph` + `UserRegistry` |
-| F3 → Gephi/GrafoGen | `*.gexf` | GEXF 1.3 |
-| F4 → relatório/GrafoGen | `centrality.csv`, `communities.csv`, `structure.json` | ver Parte 4 |
-
-### 1.4 Modelagem dos quatro grafos (enunciado)
-
-| Grafo | O que modela | Tipos em `interactions.csv` |
-|-------|--------------|----------------------------|
-| **G1** | Comentários em issue ou PR | `comment_issue`, `comment_pr` |
-| **G2** | Fechamento de issue por outro usuário | `close_issue` |
-| **G3** | Revisões/aprovações/merges de PR | `review_pr`, `merge_pr` |
-| **G4** | Integrado ponderado (soma de pesos) | todos os tipos válidos |
-
-**Pesos oficiais (G4 e minerador):**
-
-| Tipo | Peso |
-|------|------|
-| `comment_issue` | 2 |
-| `comment_pr` | 2 |
-| `open_issue_commented` | 3 |
-| `close_issue` | 3 |
-| `review_pr` | 4 |
-| `merge_pr` | 5 |
+| Tipo de interação | Significado | Peso |
+|-------------------|-------------|------|
+| `comment_issue` | Comentário em uma issue | 2 |
+| `comment_pr` | Comentário em um PR | 2 |
+| `open_issue_commented` | Autor da issue quando ela recebe comentário | 3 |
+| `close_issue` | Fechamento de issue por outro usuário | 3 |
+| `review_pr` | Revisão de PR (qualquer status) | 4 |
+| `merge_pr` | Merge de PR feito por outro usuário | 5 |
 
 ---
 
