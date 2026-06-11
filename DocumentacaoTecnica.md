@@ -99,13 +99,12 @@ Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`
 
 **Tipos permitidos:**
 
-```text
-comment_issue | comment_pr | open_issue_commented | review_pr | merge_pr | close_issue
-```
-
-**Validações (`__post_init__`):** logins não vazios; `type` válido; `src ≠ dst`; `weight > 0`; `timestamp` obrigatório.
-
-`to_row()` → dicionário para CSV.
+- `comment_issue` — comentário em issue
+- `comment_pr` — comentário em PR
+- `open_issue_commented` — autor da issue ao receber comentário
+- `review_pr` — revisão de PR
+- `merge_pr` — merge de PR por terceiro
+- `close_issue` — fechamento de issue por terceiro
 
 ### `MiningEvent` — log bruto (não vira aresta diretamente)
 
@@ -125,15 +124,6 @@ Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`,
 ### Por que filtrar PRs na API de issues?
 
 `repo.get_issues(state="all")` retorna **issues + PRs** (PRs têm campo `pull_request`). O `IssueMiner` ignora itens com `pull_request` preenchido.
-
-**Stats:** `scanned_items`, `mined_issues`, `skipped_pull_requests`
-Tipos permitidos em `Interaction`:
-- `comment_issue` — comentário em issue
-- `comment_pr` — comentário em PR
-- `open_issue_commented` — autor da issue ao receber comentário
-- `review_pr` — revisão de PR
-- `merge_pr` — merge de PR por terceiro
-- `close_issue` — fechamento de issue por terceiro
 
 **`MiningEvent`** é um log bruto de eventos. Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`. Ao contrário de `Interaction`, o destino pode ser vazio e auto-interações são permitidas no log. `MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
 
