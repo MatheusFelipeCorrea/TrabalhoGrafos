@@ -244,7 +244,7 @@ AbstractGraph  ←  classe base abstrata
     ├── AdjacencyMatrixGraph  (usa numpy)
     └── AdjacencyListGraph   (usa dict) 
 
-### 3.1 `abstract_graph.py` — `AbstractGraph`
+## 3.1 `abstract_graph.py` — `AbstractGraph`
 O AbstractGraph define o contrato — todas as funções que qualquer implementação precisa ter. As duas subclasses implementam isso de formas diferentes internamente, mas produzem o mesmo resultado.
 - Classe base que centraliza o contrato da API, validações comuns, contagem de vértices e arestas, pesos e rótulos de vértices e exportação GEXF. Ambas as implementações herdam desta classe.
 
@@ -272,7 +272,6 @@ O AbstractGraph define o contrato — todas as funções que qualquer implementa
 | `is_empty_graph()` | `True` se não há arestas |
 | `is_complete_graph()` | `True` se todo par ordenado (u,v) com u != v possui aresta |
 | `export_to_gephi(path)` | Serializa o grafo como GEXF 1.3 no caminho especificado |
-  
   
 ### 3.2 `exceptions.py`
 
