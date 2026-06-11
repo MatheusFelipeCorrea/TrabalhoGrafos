@@ -199,7 +199,7 @@ python -m pytest tests/test_mining.py --cov=src.mining --cov-report=term-missing
 
 **Responsável: Matheus Felipe**
 
-A frente de estruturas de grafo é a biblioteca central do projeto. Implementa do zero duas representações de grafos direcionados ponderados (matriz de adjacência e lista de adjacência), sem uso de bibliotecas externas como networkx ou igraph. Toda a F3 (builders) e F4 (análise) usam essa API.
+A frente que implementa do zero a lógica dos 4 grafos, através da duas matriz de adjacência e lista de adjacência, sem uso de bibliotecas externas como networkx ou igraph. Toda a F3 (builders) e F4 (análise) usam essa API.
 
 ### 3.1 Decisões de Implementação
 
