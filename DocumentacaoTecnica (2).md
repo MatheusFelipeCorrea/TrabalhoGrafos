@@ -273,6 +273,7 @@ O AbstractGraph define o contrato — todas as funções que qualquer implementa
 | `is_complete_graph()` | `True` se todo par ordenado (u,v) com u != v possui aresta |
 | `export_to_gephi(path)` | Serializa o grafo como GEXF 1.3 no caminho especificado |
   
+  
 ### 3.2 `exceptions.py`
 
 | Exceção | Quando é lançada |
