@@ -1,6 +1,8 @@
-# GitHub Graph Analyzer — Documentação Técnica
+# Documentação Técnica — GitHub Graph Analyzer
 
-> Repositório analisado: `github/spec-kit`
+Documento **único** do projeto para estudo do caso e leitura em grupo. Descreve **o que cada frente faz**, **como faz** e **como se conecta** às demais — alinhado ao código em `github-graph-analyzer/` e `frontend-grafogen/`.
+
+**Repositório analisado:** `github/spec-kit`
 
 | Frente | Responsável | Pasta |
 |--------|-------------|-------|
@@ -8,8 +10,8 @@
 | F2 — Graph Structures | Matheus Felipe | `src/graph/` |
 | F3 — Builders | Alice Shikida | `src/builder/` |
 | F4 — Analysis | Diogo Meireles | `src/analysis/` |
-| F5 — Integração (CLI) | Diogo Meireles | `src/app/main.py` |
-| F5.5 — Frontend GrafoGen | Matheus Felipe | `frontend-grafogen/` |
+| F5 — Integração (CLI) | Diogo Meireles | `src/app/main.py`, `src/app/api_demo.py` |
+| F5.5 — Frontend (GrafoGen) | Matheus Felipe | `frontend-grafogen/` |
 
 ---
 
