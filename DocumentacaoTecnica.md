@@ -106,7 +106,7 @@ Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`
 - `merge_pr` — merge de PR por terceiro
 - `close_issue` — fechamento de issue por terceiro
 
-### `MiningEvent` — log bruto (não vira aresta diretamente)
+### `MiningEvent` — log bruto (não vira aresta diretamente) - Registros
 
 Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`
 
@@ -119,13 +119,16 @@ Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`,
 | Peso | sim | não |
 | Arquivo | `interactions.csv` | `events.csv` |
 
+A Interaction já é o dado processado: extraiu origem, destino, calculou o peso, validou que não é auto-interação, e tá pronto pra virar aresta no grafo.
+
+`MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
+
 ## 1.6 `issue_miner.py` — `IssueMiner`
 
 ### Por que filtrar PRs na API de issues?
 
 `repo.get_issues(state="all")` retorna **issues + PRs** (PRs têm campo `pull_request`). O `IssueMiner` ignora itens com `pull_request` preenchido.
 
-**`MiningEvent`** é um log bruto de eventos. Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`. Ao contrário de `Interaction`, o destino pode ser vazio e auto-interações são permitidas no log. `MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
 
 Para cada issue real, o método `_extract_issue_interactions(issue)` executa:
 
@@ -136,7 +139,7 @@ Para cada issue real, o método `_extract_issue_interactions(issue)` executa:
 
 O método `_should_skip_self_interaction(src, dst)` descarta qualquer interação onde origem e destino são o mesmo login ou onde algum dos dois está vazio.
 
-#### `pr_miner.py` — `PRMiner`
+#### `pr_miner.py` — `PRMiner` 
 
 Usa `repo.get_pulls(state='all')` e extrai interações de cada PR via `_extract_pr_interactions(pr)`. As fontes de dados são: `pr.get_issue_comments()` para comentários gerais, `pr.get_review_comments()` para comentários em linhas de código, e `pr.get_reviews()` para aprovações e pedidos de mudança.
 
