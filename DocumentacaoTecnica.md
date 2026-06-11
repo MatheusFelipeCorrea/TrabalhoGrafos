@@ -62,6 +62,12 @@ Em todos os grafos, uma aresta A → B significa que o usuário A realizou uma a
 
 A frente de mineração é o ponto de entrada do pipeline. Ela acessa a API do GitHub via PyGithub e transforma a atividade do repositório em arquivos CSV estruturados que alimentam as demais frentes.
 
+O minerador coleta dados de `github/spec-kit` via **PyGithub** e gera três arquivos:
+
+- `users.csv` — usuários vistos na mineração
+- `interactions.csv` — arestas usuario→usuario para os builders
+- `events.csv` — log bruto de eventos (nem tudo vira aresta)
+
 ### 2.1 Configuração e Dependências
 
 Dependências principais (`requirements.txt`): `PyGithub`, `python-dotenv`, `pandas`, `tqdm`, `pytest`, `pytest-cov`.
@@ -85,24 +91,42 @@ Se `--repo` for omitido, o padrão já é `github/spec-kit`.
 
 ### 2.3 Arquivos e Classes
 
-#### `github_client.py` — `GitHubClient`
+## 1.5 `interaction_model.py`
 
-Encapsula todo o acesso à API do GitHub, adicionando lógica de retry e controle de rate limit para tornar a mineração resiliente a falhas temporárias.
+### `Interaction` — vira aresta de grafo
 
-| Método | O que faz |
-|--------|-----------|
-| `__init__(token, sleep)` | Usa o token passado ou busca `GITHUB_TOKEN` do ambiente. O parâmetro `sleep` é injetável, facilitando testes unitários sem esperas reais. |
-| `get_repo(full_name)` | Recebe uma string no formato `owner/repo` e retorna o objeto repositório. Lança `ValueError` se o formato for inválido. |
-| `request_with_retry(op_name, operation, max_retries=5)` | Executa uma operação qualquer com retry exponencial mais jitter aleatório. Aceita até 5 tentativas por padrão. |
-| `_is_retryable_error(error)` | Identifica se um erro justifica nova tentativa: rate limit, HTTP 403/429/5xx, timeout e erros de conexão. |
-| `_rate_limit_delay(error)` | Quando o GitHub retorna o header `x-ratelimit-reset`, calcula e aguarda exatamente o tempo necessário antes de tentar novamente. |
+Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`
 
-#### `interaction_model.py` — `Interaction` e `MiningEvent`
+**Tipos permitidos:**
 
-Define os dois modelos de dados produzidos pela mineração.
+```text
+comment_issue | comment_pr | open_issue_commented | review_pr | merge_pr | close_issue
+```
 
-**`Interaction`** representa uma aresta do grafo. Campos: `src_login`, `dst_login`, `type`, `weight`, `timestamp`, `source_id`. As validações no `__post_init__` garantem que os logins não sejam vazios, o tipo seja um dos permitidos, `src` seja diferente de `dst`, `weight` seja positivo e `timestamp` seja obrigatório. O método `to_row()` converte o objeto em dicionário para escrita no CSV.
+**Validações (`__post_init__`):** logins não vazios; `type` válido; `src ≠ dst`; `weight > 0`; `timestamp` obrigatório.
 
+`to_row()` → dicionário para CSV.
+
+### `MiningEvent` — log bruto (não vira aresta diretamente)
+
+Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`
+
+**Tipos:** `issue_comment`, `issue_closed`, `pr_opened`, `pr_comment`, `pr_review`, `pr_approval`, `pr_merged`
+
+| | `Interaction` | `MiningEvent` |
+|---|---------------|---------------|
+| Destino | obrigatório | pode ser vazio |
+| Auto-interação | proibida | permitida no log |
+| Peso | sim | não |
+| Arquivo | `interactions.csv` | `events.csv` |
+
+## 1.6 `issue_miner.py` — `IssueMiner`
+
+### Por que filtrar PRs na API de issues?
+
+`repo.get_issues(state="all")` retorna **issues + PRs** (PRs têm campo `pull_request`). O `IssueMiner` ignora itens com `pull_request` preenchido.
+
+**Stats:** `scanned_items`, `mined_issues`, `skipped_pull_requests`
 Tipos permitidos em `Interaction`:
 - `comment_issue` — comentário em issue
 - `comment_pr` — comentário em PR
@@ -112,10 +136,6 @@ Tipos permitidos em `Interaction`:
 - `close_issue` — fechamento de issue por terceiro
 
 **`MiningEvent`** é um log bruto de eventos. Campos: `event_type`, `actor_login`, `target_login`, `source_kind`, `source_id`, `timestamp`, `state`. Ao contrário de `Interaction`, o destino pode ser vazio e auto-interações são permitidas no log. `MiningEvent`s vão para `events.csv` (auditoria); `Interaction`s vão para `interactions.csv` (grafo).
-
-#### `issue_miner.py` — `IssueMiner`
-
-> **Particularidade importante:** a API `repo.get_issues(state='all')` do GitHub retorna tanto issues reais quanto pull requests (PRs possuem o campo `pull_request` preenchido). O `IssueMiner` filtra e ignora todos os itens com `pull_request` preenchido, garantindo que apenas issues reais sejam processadas. As estatísticas `scanned_items`, `mined_issues` e `skipped_pull_requests` permitem auditar esse processo.
 
 Para cada issue real, o método `_extract_issue_interactions(issue)` executa:
 
