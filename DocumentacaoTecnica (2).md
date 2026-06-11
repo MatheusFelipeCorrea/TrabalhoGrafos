@@ -131,7 +131,7 @@ Se `--repo` for omitido, o padrão já é `github/spec-kit`.
 
 ### 2.3 Fluxo de `run_mining()` (`main.py`)
 
-1. Criar `GitHubClient`
+1. Criar `GitHubClient` - Encapsula acesso ao GitHub com retry e rate limit.
 2. Criar `IssueMiner` e `PRMiner`
 3. `issue_miner.mine(repo)` → lista de `Interaction`
 4. `pr_miner.mine(repo)` → lista de `Interaction`
