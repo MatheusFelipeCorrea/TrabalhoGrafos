@@ -32,14 +32,30 @@ O GitHub Graph Analyzer é uma ferramenta acadêmica que minera dados de colabor
 O repositório analisado é o `github/spec-kit`. Todo o pipeline é executado localmente, sem dependência de bibliotecas externas de grafos (networkx, igraph etc. são proibidos pelo enunciado).
 
 ## 1. Panorama do pipeline
-### 1.1 Fluxo Geral de Dados
+### 1.1 Fluxo de dados
 
-| Etapa | Comando CLI | Entrada | Saída |
-|-------|-------------|---------|-------|
-| Mineração (F1) | `--mine` | GitHub API | `users.csv`, `interactions.csv`, `events.csv` |
-| Build dos grafos (F3) | `--build` | CSVs de `data/raw/` | 4 arquivos `.gexf` em `output/graphs/` |
-| Análise (F4) | `--analyze` | CSVs de `data/raw/` | `centrality.csv`, `communities.csv`, `structure.json` |
-| Frontend (F5.5) | `npm run dev` | GEXF + CSVs de métricas | Visualização interativa no browser |
+```text
+GitHub API
+    │
+    ▼  --mine
+[F1 Mining]  →  data/raw/users.csv
+              →  data/raw/interactions.csv
+              →  data/raw/events.csv
+    │
+    ▼  --build
+[F3 Builders]  →  output/graphs/graph1_comments.gexf   (G1)
+              →  output/graphs/graph2_closures.gexf    (G2)
+              →  output/graphs/graph3_reviews.gexf      (G3)
+              →  output/graphs/graph4_integrated.gexf  (G4)
+    │              (usa API da F2 em memória)
+    ▼  --analyze
+[F4 Analysis]  →  output/reports/centrality.csv
+              →  output/reports/structure.json
+              →  output/reports/communities.csv
+    │
+    ▼  leitura via API / GEXF
+[F5.5 GrafoGen]  →  visualização web (Vis-Network) + orquestração do pipeline
+```
 
 A F2 (Graph Structures) não aparece como etapa separada na CLI — ela é a biblioteca de grafos que as frentes F3 e F4 usam internamente. O comando `--all` executa `mine → build → analyze` em sequência.
 
