@@ -14,13 +14,33 @@ class PRMiner:
     def __init__(self, client: GitHubClient) -> None:
         self.client = client
         self.events: list[MiningEvent] = []
+        self.processed_pull_request_ids: set[str] = set()
+        self.stats = {
+            "scanned_pull_requests": 0,
+            "mined_pull_requests": 0,
+            "skipped_cached_pull_requests": 0,
+        }
 
-    def mine(self, repo_full_name: str) -> list[Interaction]:
+    def mine(self, repo_full_name: str, processed_pull_request_ids: set[str] | None = None) -> list[Interaction]:
         self.events = []
+        self.processed_pull_request_ids = set()
+        cached_pull_request_ids = processed_pull_request_ids or set()
+        self.stats = {
+            "scanned_pull_requests": 0,
+            "mined_pull_requests": 0,
+            "skipped_cached_pull_requests": 0,
+        }
         repo = self.client.get_repo(repo_full_name)
         pulls = self.client.request_with_retry("list_pulls", lambda: repo.get_pulls(state="all"))
         interactions: list[Interaction] = []
         for pr in tqdm(pulls, desc="Mining PRs", unit="pr"):
+            self.stats["scanned_pull_requests"] += 1
+            pr_id = str(pr.number)
+            if pr_id in cached_pull_request_ids:
+                self.stats["skipped_cached_pull_requests"] += 1
+                continue
+            self.stats["mined_pull_requests"] += 1
+            self.processed_pull_request_ids.add(pr_id)
             interactions.extend(self._extract_pr_interactions(pr))
         return interactions
 

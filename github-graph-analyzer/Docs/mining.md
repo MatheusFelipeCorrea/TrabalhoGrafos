@@ -4,11 +4,12 @@ Este documento explica o minerador implementado em `src/mining/` e o ponto de en
 
 ## Visao Geral
 
-O minerador coleta dados do repositorio `github/spec-kit` usando a biblioteca PyGithub. Ele gera tres arquivos em `data/raw/`:
+O minerador coleta dados do repositorio `github/spec-kit` usando a biblioteca PyGithub. Ele gera estes arquivos em `data/raw/`:
 
 - `users.csv`: lista de usuarios encontrados na mineracao.
 - `interactions.csv`: interacoes usuario-usuario usadas pelos builders de grafos.
 - `events.csv`: eventos brutos minerados, incluindo eventos que nao viram aresta de grafo diretamente.
+- `mining_cache.json`: checkpoint incremental com issues e pull requests ja processados.
 
 O comando principal e:
 
@@ -48,12 +49,14 @@ O fluxo executado por `python -m src.app.main --mine` e:
 1. Criar um `GitHubClient`.
 2. Criar um `IssueMiner`.
 3. Criar um `PRMiner`.
-4. Minerar issues reais.
-5. Minerar pull requests.
-6. Juntar as interacoes dos dois miners.
-7. Juntar os eventos brutos dos dois miners.
-8. Gerar usuarios a partir de interacoes e eventos.
-9. Exportar `users.csv`, `interactions.csv` e `events.csv`.
+4. Carregar o cache incremental.
+5. Carregar `interactions.csv` e `events.csv` existentes, se houver.
+6. Minerar apenas issues reais ainda nao processadas.
+7. Minerar apenas pull requests ainda nao processados.
+8. Juntar dados antigos com dados novos.
+9. Gerar usuarios a partir de interacoes e eventos.
+10. Exportar `users.csv`, `interactions.csv` e `events.csv`.
+11. Salvar `mining_cache.json`.
 
 O arquivo que orquestra isso e `src/app/main.py`, principalmente a funcao `run_mining`.
 
@@ -601,6 +604,18 @@ Logica:
 4. Ordena por `source_kind`, `source_id`, `event_type`, `timestamp`.
 5. Salva CSV.
 
+### `load_interactions_csv(input_path)`
+
+Carrega um `interactions.csv` existente e reconstrói objetos `Interaction`.
+
+Esse metodo e usado pela mineracao incremental. Antes de minerar dados novos, o pipeline le as interacoes antigas para nao sobrescrever o CSV apenas com a parte nova.
+
+### `load_events_csv(input_path)`
+
+Carrega um `events.csv` existente e reconstrói objetos `MiningEvent`.
+
+Tambem e usado na mineracao incremental para preservar eventos antigos antes de adicionar os eventos novos.
+
 ### `_ensure_output_dir(output_path)`
 
 Cria o diretorio pai do CSV caso ele ainda nao exista.
@@ -621,6 +636,115 @@ Cria uma lista minima de usuarios a partir de:
 
 Isso garante que usuarios que aparecem apenas em eventos brutos tambem entrem em `users.csv`.
 
+## `mining_cache.py`
+
+Arquivo responsavel pelo cache incremental da mineracao.
+
+Ele evita que execucoes posteriores refaçam as chamadas caras para comentarios, eventos, reviews e merges de issues/PRs que ja foram processados.
+
+### Arquivo gerado
+
+O cache fica em:
+
+```text
+data/raw/mining_cache.json
+```
+
+Formato:
+
+```json
+{
+  "repository": "github/spec-kit",
+  "processed_issues": ["1", "2", "3"],
+  "processed_pull_requests": ["10", "11", "12"]
+}
+```
+
+Esse arquivo deve ser commitado junto com:
+
+```text
+data/raw/users.csv
+data/raw/interactions.csv
+data/raw/events.csv
+```
+
+Assim, os colegas conseguem rodar a mineracao incremental sem refazer tudo do zero.
+
+### Classe `MiningCache`
+
+Guarda:
+
+```text
+repository
+processed_issues
+processed_pull_requests
+```
+
+### `load(cache_path, output_dir, repository)`
+
+Carrega o checkpoint incremental.
+
+Fluxo:
+
+1. Se `mining_cache.json` existe e pertence ao mesmo repositorio, carrega os IDs.
+2. Le tambem `events.csv`, se existir.
+3. Le tambem `interactions.csv`, se existir.
+4. Usa esses CSVs para inferir IDs ja processados.
+
+Essa inferencia pelos CSVs ajuda quando alguem recebeu apenas os dados minerados, mas ainda nao tinha o `mining_cache.json`.
+
+### `save(cache_path)`
+
+Salva o cache atualizado.
+
+Depois de uma mineracao nova, o cache passa a incluir:
+
+- IDs que ja estavam no cache.
+- IDs inferidos pelos CSVs existentes.
+- IDs processados na execucao atual.
+
+### `mark_issues(issue_ids)`
+
+Adiciona IDs de issues processadas na execucao atual.
+
+### `mark_pull_requests(pull_request_ids)`
+
+Adiciona IDs de pull requests processados na execucao atual.
+
+## Como a Mineracao Incremental Funciona
+
+Na primeira execucao:
+
+1. Nao existe cache.
+2. O minerador varre issues e PRs.
+3. Busca comentarios, eventos, reviews e merges.
+4. Gera CSVs.
+5. Gera `mining_cache.json`.
+
+Nas proximas execucoes:
+
+1. O pipeline carrega `mining_cache.json`.
+2. Tambem carrega `interactions.csv` e `events.csv` existentes.
+3. Ao listar issues e PRs, compara o numero de cada item com o cache.
+4. Se o ID ja foi processado, pula sem buscar comentarios/reviews/eventos.
+5. Se o ID e novo, minera normalmente.
+6. Junta dados antigos + dados novos.
+7. Reexporta CSVs idempotentes.
+8. Atualiza o cache.
+
+Isso significa que ainda pode haver uma varredura leve para descobrir itens novos, mas o minerador deixa de fazer as chamadas caras para cada issue/PR antigo.
+
+### Limitacao Atual
+
+O cache atual trabalha por ID de issue/PR processado.
+
+Isso significa:
+
+- Ele e bom para buscar issues e PRs novos.
+- Ele nao revisita automaticamente uma issue antiga para descobrir comentarios novos feitos depois da ultima mineracao.
+
+Se for necessario capturar atualizacoes em itens antigos, o proximo passo seria trocar o cache por uma estrategia baseada em `updated_at`, minerando novamente apenas itens alterados desde a ultima execucao.
+
 ## `main.py`
 
 Arquivo de entrada da aplicacao.
@@ -638,19 +762,26 @@ Orquestra a mineracao inteira.
 
 Passo a passo:
 
-1. Cria `GitHubClient`.
-2. Cria `IssueMiner`.
-3. Cria `PRMiner`.
-4. Executa `issue_miner.mine(repo)`.
-5. Executa `pr_miner.mine(repo)`.
-6. Junta interacoes.
-7. Junta eventos.
-8. Cria `DataExporter`.
-9. Exporta `users.csv`.
-10. Exporta `interactions.csv`.
-11. Exporta `events.csv`.
-12. Imprime estatisticas da varredura de issues.
-13. Retorna os caminhos dos tres arquivos.
+1. Garante que `output_dir` existe.
+2. Define os caminhos de `users.csv`, `interactions.csv`, `events.csv` e `mining_cache.json`.
+3. Cria `DataExporter`.
+4. Carrega `MiningCache`.
+5. Carrega interacoes antigas de `interactions.csv`.
+6. Carrega eventos antigos de `events.csv`.
+7. Cria `GitHubClient`.
+8. Cria `IssueMiner`.
+9. Cria `PRMiner`.
+10. Executa `issue_miner.mine(repo, cache.processed_issues)`.
+11. Executa `pr_miner.mine(repo, cache.processed_pull_requests)`.
+12. Junta interacoes antigas + interacoes novas.
+13. Junta eventos antigos + eventos novos.
+14. Marca no cache os IDs processados nesta execucao.
+15. Exporta `users.csv`.
+16. Exporta `interactions.csv`.
+17. Exporta `events.csv`.
+18. Salva `mining_cache.json`.
+19. Imprime estatisticas da varredura de issues e PRs.
+20. Retorna os caminhos dos tres CSVs.
 
 ### `build_parser()`
 
@@ -738,6 +869,18 @@ pr_approval
 pr_merged
 ```
 
+## `mining_cache.json`
+
+Arquivo de checkpoint incremental.
+
+Uso:
+
+- Registrar quais issues ja foram processadas.
+- Registrar quais pull requests ja foram processados.
+- Permitir que a proxima execucao pule itens antigos.
+
+Esse arquivo nao contem token nem credencial. Ele pode e deve ser versionado junto dos CSVs minerados.
+
 ## Diferenca Entre Contar Issues e Contar Linhas
 
 Um ponto importante: `interactions.csv` nao deve ser usado diretamente como "quantidade de issues".
@@ -807,6 +950,8 @@ Eles validam:
 - validacoes de `MiningEvent`;
 - retry em erro temporario;
 - exportacao idempotente dos CSVs;
+- cache incremental inferido de CSVs existentes;
+- skip de issues e PRs ja processados;
 - formato invalido de repositorio.
 
 Comando:
@@ -825,6 +970,7 @@ python -m pytest tests/test_mining.py --cov=src.mining --cov-report=term-missing
 
 - `events.csv` e mais completo para auditoria da mineracao.
 - `interactions.csv` e mais adequado para construir grafos.
+- `mining_cache.json` deve ser commitado junto dos CSVs minerados para acelerar a execucao dos colegas.
 - Auto-interacoes sao descartadas em `interactions.csv`, mas podem aparecer como eventos brutos quando fizer sentido registrar o acontecimento.
 - O token do GitHub deve ficar apenas no `.env`.
 - A API do GitHub pode retornar muitos itens; o retry ajuda, mas a mineracao ainda depende dos limites da conta/token.
@@ -842,5 +988,6 @@ O resultado tambem tem duas naturezas:
 
 1. `interactions.csv`: dados prontos para virar grafo.
 2. `events.csv`: log estruturado dos eventos minerados.
+3. `mining_cache.json`: checkpoint para evitar refazer mineracao antiga.
 
 Essa separacao evita forcar todo evento do GitHub a virar uma aresta de grafo, mas ainda preserva os dados importantes para analise.
