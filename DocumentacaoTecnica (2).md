@@ -224,10 +224,10 @@ event_type,actor_login,target_login,source_kind,source_id,timestamp,state
    pr.merged     # True ou False
    pr.merged_by  # quem mergeou, ou None
 A API já retorna a descrição dos PRs.
-7. As listas de interações e eventos são combinadas
-8. `users_from_interactions()` extrai os logins únicos
-9. `DataExporter` grava os três CSVs em `data/raw/`
-10. Estatísticas são impressas no terminal
+7. As listas de interações (interection.csv) e eventos (events.csv) são combinadas.
+9. `users_from_interactions()` extrai os logins únicos
+10. `DataExporter` grava os três CSVs em `data/raw/`
+11. Estatísticas são impressas no terminal
 
 ### 2.8 Testes F1
 
