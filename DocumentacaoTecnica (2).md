@@ -333,6 +333,8 @@ Mantém `_adjacency[u]` como um dicionário que mapeia `v → peso` para cada vi
 - Primeira chamada: cria a aresta com peso `0.0` e incrementa o contador interno
 - Chamadas repetidas: não alteram o peso nem incrementam o contador
 - Para definir o peso: usar `set_edge_weight(u, v, peso)` após o `add_edge`
+  Por interação: `add_edge(src, dst)` + `set_edge_weight(src, dst, peso)`
+   No G4: se aresta existe, **somar** pesos
 
 ### 3.6 `gephi_exporter.py`
 
@@ -349,14 +351,7 @@ graph.export_to_gephi("output/graphs/exemplo.gexf")
 
 Abre no **Gephi** ou no **GrafoGen** (Parte 5).
 
-### 3.7 Contrato esperado pela F3
-
-1. `AdjacencyListGraph(n)` ou `AdjacencyMatrixGraph(n)` com `n = |usuários|`
-2. `set_vertex_label(i, login)` para cada usuário
-3. Por interação: `add_edge(src, dst)` + `set_edge_weight(src, dst, peso)`
-4. No G4: se aresta existe, **somar** pesos
-
-### 3.8 `api_demo.py`
+### 3.7 `api_demo.py`
 
 Aplicação separada que executa todas as operações da API em um grafo de 3 vértices (nas duas implementações) e exporta `output/demo/graph_demo.gexf`. É a demonstração exigida pela Etapa 2 do enunciado.
 
@@ -364,7 +359,7 @@ Aplicação separada que executa todas as operações da API em um grafo de 3 v�
 python -m src.app.api_demo
 ```
 
-### 3.9 Testes F2
+### 3.8 Testes F2
 
 ```bash
 python -m pytest tests/test_graph_matrix.py tests/test_graph_list.py -v
@@ -375,7 +370,7 @@ python -m pytest tests/test_graph_matrix.py tests/test_graph_list.py --cov=src.g
 
 Cenários: fluxo feliz; idempotência; exceções; equivalência matriz/lista; GEXF válido; vazio/unitário/completo/desconectado.
 
-### 3.10 Resumo rápido F2
+### 3.9 Resumo rápido F2
 
 Responde: *"Como representamos e manipulamos o grafo no código?"*
 
