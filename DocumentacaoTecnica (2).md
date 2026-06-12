@@ -192,28 +192,7 @@ Usa `repo.get_pulls(state='all')` e extrai interações de cada PR via `_extract
 | Merge por outra pessoa | `pr_merged` | `merged_by → author` (`merge_pr`, peso 5) |
 | Merge pelo próprio autor | `pr_merged` | Evento sim, aresta não (evita laço no grafo) |
 
-
-### 2.6 Schemas dos CSVs (contrato com F3)
-
-#### `users.csv`
-
-```csv
-login,user_id,name
-```
-
-#### `interactions.csv`
-
-```csv
-src_login,dst_login,type,weight,timestamp,source_id
-```
-
-#### `events.csv`
-
-```csv
-event_type,actor_login,target_login,source_kind,source_id,timestamp,state
-```
-
-### 2.7 Fluxo Completo de `run_mining()`
+### 2.6 Fluxo Completo de `run_mining()`
 
 1. Criação do `GitHubClient` com o token do ambiente
 2. Chama client.get_repo("github/spec-kit")
