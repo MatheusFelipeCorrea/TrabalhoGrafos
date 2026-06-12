@@ -216,13 +216,18 @@ event_type,actor_login,target_login,source_kind,source_id,timestamp,state
 ### 2.7 Fluxo Completo de `run_mining()`
 
 1. Criação do `GitHubClient` com o token do ambiente
-2. Criação das instâncias de `IssueMiner` e `PRMiner`
-3. `issue_miner.mine(repo)` percorre todas as issues e retorna lista de `Interaction`
-4. `pr_miner.mine(repo)` percorre todos os PRs e retorna lista de `Interaction`
-5. As listas de interações e eventos são combinadas
-6. `users_from_interactions()` extrai os logins únicos
-7. `DataExporter` grava os três CSVs em `data/raw/`
-8. Estatísticas são impressas no terminal
+2. Chama client.get_repo("github/spec-kit")
+3. Criação das instâncias de `IssueMiner` e `PRMiner`
+4. `issue_miner.mine(repo)` percorre todas as issues e retorna lista de `Interaction`. Se há pull_request preenchido, é pulado = (skipped_pull_requests++) - mineira so as issues.
+5. `pr_miner.mine(repo)` percorre todos os PRs e retorna lista de `Interaction`
+   pr.state      # "open" ou "closed"
+   pr.merged     # True ou False
+   pr.merged_by  # quem mergeou, ou None
+A API já retorna a descrição dos PRs.
+7. As listas de interações e eventos são combinadas
+8. `users_from_interactions()` extrai os logins únicos
+9. `DataExporter` grava os três CSVs em `data/raw/`
+10. Estatísticas são impressas no terminal
 
 ### 2.8 Testes F1
 
