@@ -14,18 +14,23 @@ class IssueMiner:
     def __init__(self, client: GitHubClient) -> None:
         self.client = client
         self.events: list[MiningEvent] = []
+        self.processed_issue_ids: set[str] = set()
         self.stats = {
             "scanned_items": 0,
             "mined_issues": 0,
             "skipped_pull_requests": 0,
+            "skipped_cached_issues": 0,
         }
 
-    def mine(self, repo_full_name: str) -> list[Interaction]:
+    def mine(self, repo_full_name: str, processed_issue_ids: set[str] | None = None) -> list[Interaction]:
         self.events = []
+        self.processed_issue_ids = set()
+        cached_issue_ids = processed_issue_ids or set()
         self.stats = {
             "scanned_items": 0,
             "mined_issues": 0,
             "skipped_pull_requests": 0,
+            "skipped_cached_issues": 0,
         }
         repo = self.client.get_repo(repo_full_name)
         issues = self.client.request_with_retry(
@@ -38,7 +43,12 @@ class IssueMiner:
             if getattr(issue, "pull_request", None):
                 self.stats["skipped_pull_requests"] += 1
                 continue
+            issue_id = str(issue.number)
+            if issue_id in cached_issue_ids:
+                self.stats["skipped_cached_issues"] += 1
+                continue
             self.stats["mined_issues"] += 1
+            self.processed_issue_ids.add(issue_id)
             interactions.extend(self._extract_issue_interactions(issue))
         return interactions
 

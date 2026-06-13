@@ -21,27 +21,48 @@ def run_mining(repo: str = DEFAULT_REPOSITORY, output_dir: Path = DEFAULT_OUTPUT
     from src.mining.data_exporter import DataExporter, users_from_interactions
     from src.mining.github_client import GitHubClient
     from src.mining.issue_miner import IssueMiner
+    from src.mining.mining_cache import MiningCache
     from src.mining.pr_miner import PRMiner
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    users_path = output_dir / "users.csv"
+    interactions_path = output_dir / "interactions.csv"
+    events_path = output_dir / "events.csv"
+    cache_path = output_dir / "mining_cache.json"
+
+    exporter = DataExporter()
+    cache = MiningCache.load(cache_path, output_dir, repo)
+    existing_interactions = exporter.load_interactions_csv(str(interactions_path))
+    existing_events = exporter.load_events_csv(str(events_path))
 
     client = GitHubClient()
     issue_miner = IssueMiner(client)
     pr_miner = PRMiner(client)
-    interactions = issue_miner.mine(repo)
-    interactions.extend(pr_miner.mine(repo))
-    events = issue_miner.events + pr_miner.events
+    new_interactions = issue_miner.mine(repo, cache.processed_issues)
+    new_interactions.extend(pr_miner.mine(repo, cache.processed_pull_requests))
+    new_events = issue_miner.events + pr_miner.events
+    interactions = existing_interactions + new_interactions
+    events = existing_events + new_events
 
-    exporter = DataExporter()
-    users_path = output_dir / "users.csv"
-    interactions_path = output_dir / "interactions.csv"
-    events_path = output_dir / "events.csv"
+    cache.mark_issues(issue_miner.processed_issue_ids)
+    cache.mark_pull_requests(pr_miner.processed_pull_request_ids)
+
     exporter.export_users_csv(users_from_interactions(interactions, events), str(users_path))
     exporter.export_interactions_csv(interactions, str(interactions_path))
     exporter.export_events_csv(events, str(events_path))
+    cache.save(cache_path)
     print(
         "Issue scan: "
         f"{issue_miner.stats['scanned_items']} issue-API items, "
         f"{issue_miner.stats['mined_issues']} real issues, "
-        f"{issue_miner.stats['skipped_pull_requests']} pull requests skipped"
+        f"{issue_miner.stats['skipped_pull_requests']} pull requests skipped, "
+        f"{issue_miner.stats['skipped_cached_issues']} cached issues skipped"
+    )
+    print(
+        "PR scan: "
+        f"{pr_miner.stats['scanned_pull_requests']} pull requests, "
+        f"{pr_miner.stats['mined_pull_requests']} mined, "
+        f"{pr_miner.stats['skipped_cached_pull_requests']} cached pull requests skipped"
     )
     return str(users_path), str(interactions_path), str(events_path)
 

@@ -11,6 +11,7 @@ from src.mining.data_exporter import DataExporter, users_from_interactions
 from src.mining.github_client import GitHubClient
 from src.mining.interaction_model import Interaction, MiningEvent
 from src.mining.issue_miner import IssueMiner
+from src.mining.mining_cache import MiningCache
 from src.mining.pr_miner import PRMiner
 
 
@@ -118,6 +119,7 @@ def test_cenario_feliz_mining():
         "scanned_items": 2,
         "mined_issues": 1,
         "skipped_pull_requests": 1,
+        "skipped_cached_issues": 0,
     }
     event_types = {row["event_type"] for row in event_rows}
     assert {
@@ -266,6 +268,64 @@ def test_exportacao_csv_idempotente(tmp_path):
     assert users["login"].tolist() == ["alice", "bob", "carol"]
     assert len(exported) == 2
     assert len(events) == 2
+
+
+def test_mineracao_incremental_pula_ids_processados():
+    client = MockClient()
+
+    issue_miner = IssueMiner(client)
+    issue_interactions = issue_miner.mine("github/spec-kit", processed_issue_ids={"42"})
+    pr_miner = PRMiner(client)
+    pr_interactions = pr_miner.mine("github/spec-kit", processed_pull_request_ids={"87"})
+
+    assert issue_interactions == []
+    assert issue_miner.events == []
+    assert issue_miner.processed_issue_ids == set()
+    assert issue_miner.stats == {
+        "scanned_items": 2,
+        "mined_issues": 0,
+        "skipped_pull_requests": 1,
+        "skipped_cached_issues": 1,
+    }
+    assert pr_interactions == []
+    assert pr_miner.events == []
+    assert pr_miner.processed_pull_request_ids == set()
+    assert pr_miner.stats == {
+        "scanned_pull_requests": 1,
+        "mined_pull_requests": 0,
+        "skipped_cached_pull_requests": 1,
+    }
+
+
+def test_cache_inferido_dos_csvs_existentes(tmp_path):
+    exporter = DataExporter()
+    interactions_path = tmp_path / "interactions.csv"
+    events_path = tmp_path / "events.csv"
+    cache_path = tmp_path / "mining_cache.json"
+    interactions = [
+        Interaction("bob", "alice", "comment_issue", 2, TS, "42"),
+        Interaction("erin", "diana", "merge_pr", 5, TS, "87"),
+    ]
+    events = [
+        MiningEvent("issue_comment", "bob", "alice", "issue", "42", TS),
+        MiningEvent("pr_opened", "diana", "", "pull_request", "87", TS),
+    ]
+    exporter.export_interactions_csv(interactions, str(interactions_path))
+    exporter.export_events_csv(events, str(events_path))
+
+    cache = MiningCache.load(cache_path, tmp_path, "github/spec-kit")
+
+    assert cache.processed_issues == {"42"}
+    assert cache.processed_pull_requests == {"87"}
+    assert exporter.load_interactions_csv(str(interactions_path)) == interactions
+    assert exporter.load_events_csv(str(events_path)) == events
+
+    cache.mark_issues({"100"})
+    cache.mark_pull_requests({"101"})
+    cache.save(cache_path)
+    reloaded = MiningCache.load(cache_path, tmp_path, "github/spec-kit")
+    assert reloaded.processed_issues == {"42", "100"}
+    assert reloaded.processed_pull_requests == {"87", "101"}
 
 
 def test_get_repo_valida_formato():

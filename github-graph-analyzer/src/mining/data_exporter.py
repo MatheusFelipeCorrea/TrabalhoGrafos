@@ -42,6 +42,25 @@ class DataExporter:
         frame.to_csv(output_path, index=False)
         return output_path
 
+    def load_interactions_csv(self, input_path: str) -> list[Interaction]:
+        path = Path(input_path)
+        if not path.exists():
+            return []
+        frame = pd.read_csv(path, keep_default_na=False)
+        if frame.empty:
+            return []
+        return [
+            Interaction(
+                row["src_login"],
+                row["dst_login"],
+                row["type"],
+                int(row["weight"]),
+                row["timestamp"],
+                row["source_id"],
+            )
+            for _, row in frame.iterrows()
+        ]
+
     def export_events_csv(self, events: list[MiningEvent], output_path: str) -> str:
         self._ensure_output_dir(output_path)
         rows = [event.to_row() for event in events]
@@ -50,6 +69,26 @@ class DataExporter:
             frame = frame.drop_duplicates().sort_values(["source_kind", "source_id", "event_type", "timestamp"])
         frame.to_csv(output_path, index=False)
         return output_path
+
+    def load_events_csv(self, input_path: str) -> list[MiningEvent]:
+        path = Path(input_path)
+        if not path.exists():
+            return []
+        frame = pd.read_csv(path, keep_default_na=False)
+        if frame.empty:
+            return []
+        return [
+            MiningEvent(
+                row["event_type"],
+                row["actor_login"],
+                row["target_login"],
+                row["source_kind"],
+                row["source_id"],
+                row["timestamp"],
+                row.get("state", ""),
+            )
+            for _, row in frame.iterrows()
+        ]
 
     def _ensure_output_dir(self, output_path: str) -> None:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
