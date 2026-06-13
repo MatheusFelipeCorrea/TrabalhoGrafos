@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from unittest.mock import MagicMock
 
 import pandas as pd
 import pytest
@@ -331,3 +332,146 @@ def test_get_repo_valida_formato():
     client = GitHubClient.__new__(GitHubClient)
     with pytest.raises(ValueError, match="owner/name"):
         client.get_repo("spec-kit")
+
+
+def test_github_client_sem_token_usa_github_anonimo(monkeypatch):
+    created: list[str | None] = []
+
+    class FakeGithub:
+        def __init__(self, token=None):
+            created.append(token)
+
+        def get_repo(self, full_name):
+            return {"full_name": full_name}
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.setattr("src.mining.github_client.Github", FakeGithub)
+
+    client = GitHubClient(token="")
+
+    assert created == [None]
+    assert client.get_repo("github/spec-kit") == {"full_name": "github/spec-kit"}
+
+
+def test_github_client_exige_pygithub(monkeypatch):
+    monkeypatch.setattr("src.mining.github_client.Github", None)
+    with pytest.raises(RuntimeError, match="PyGithub is required"):
+        GitHubClient()
+
+
+def test_github_client_retry_status_codes_e_rate_limit():
+    from github import RateLimitExceededException
+
+    client = GitHubClient.__new__(GitHubClient)
+    client._sleep = lambda _delay: None
+    client.github = object()
+
+    class ForbiddenError(Exception):
+        status = 403
+        headers = {}
+
+    class TooManyRequests(Exception):
+        status = 429
+        headers = {}
+
+    assert client._is_retryable_error(RateLimitExceededException(403, {}, None))
+    assert client._is_retryable_error(ForbiddenError())
+    assert client._is_retryable_error(TooManyRequests())
+    assert client._is_retryable_error(ConnectionError())
+
+
+def test_rate_limit_delay_via_get_rate_limit(monkeypatch):
+    from github import RateLimitExceededException
+
+    client = GitHubClient.__new__(GitHubClient)
+    client.github = MagicMock()
+    client.github.get_rate_limit.return_value.core.reset = datetime(1970, 1, 1, 0, 2, tzinfo=timezone.utc)
+    monkeypatch.setattr("src.mining.github_client.time.time", lambda: 0.0)
+
+    delay = client._rate_limit_delay(RateLimitExceededException(403, {}, None))
+    assert delay == pytest.approx(121.0)
+
+
+def test_rate_limit_delay_ignora_falha_em_get_rate_limit():
+    from github import RateLimitExceededException
+
+    client = GitHubClient.__new__(GitHubClient)
+    client.github = MagicMock()
+    client.github.get_rate_limit.side_effect = RuntimeError("api unavailable")
+
+    assert client._rate_limit_delay(RateLimitExceededException(403, {}, None)) is None
+
+
+def test_request_with_retry_falha_inesperada_sem_tentativas():
+    client = GitHubClient.__new__(GitHubClient)
+    client._sleep = lambda _delay: None
+    client.github = object()
+
+    with pytest.raises(RuntimeError, match="failed unexpectedly"):
+        client.request_with_retry("noop", lambda: "ok", max_retries=-1)
+
+
+def test_users_from_interactions_inclui_eventos():
+    interactions = [Interaction("bob", "alice", "comment_issue", 2, TS, "42")]
+    events = [MiningEvent("issue_comment", "bob", "alice", "issue", "42", TS)]
+    users = users_from_interactions(interactions, events)
+    assert {row["login"] for row in users} == {"alice", "bob"}
+
+
+def test_issue_sem_autor_ignorada():
+    class IssueWithoutAuthor:
+        number = 99
+        user = None
+        pull_request = None
+
+        def get_comments(self):
+            return []
+
+        def get_events(self):
+            return []
+
+    class RepoWithAnonymousIssue:
+        def get_issues(self, state="all"):
+            return [IssueWithoutAuthor()]
+
+    class Client:
+        def get_repo(self, full_name):
+            return RepoWithAnonymousIssue()
+
+        def request_with_retry(self, op_name, operation, max_retries=5, base_delay=0.5):
+            return operation()
+
+    miner = IssueMiner(Client())
+    assert miner.mine("github/spec-kit") == []
+
+
+def test_pr_sem_autor_ignorado():
+    class PRWithoutAuthor:
+        number = 100
+        user = None
+        created_at = TS
+        merged = False
+        merged_by = None
+
+        def get_issue_comments(self):
+            return []
+
+        def get_review_comments(self):
+            return []
+
+        def get_reviews(self):
+            return []
+
+    class RepoWithAnonymousPR:
+        def get_pulls(self, state="all"):
+            return [PRWithoutAuthor()]
+
+    class Client:
+        def get_repo(self, full_name):
+            return RepoWithAnonymousPR()
+
+        def request_with_retry(self, op_name, operation, max_retries=5, base_delay=0.5):
+            return operation()
+
+    miner = PRMiner(Client())
+    assert miner.mine("github/spec-kit") == []

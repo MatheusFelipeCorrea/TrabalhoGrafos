@@ -1,0 +1,53 @@
+@startuml Caso_de_uso
+left to right direction
+skinparam packageStyle rectangle
+skinparam actorStyle awesome
+
+title Diagrama de Casos de Uso — GitHub Graph Analyzer
+
+actor "Pesquisador\n(usuário)" as User
+actor "GitHub API" as GitHub
+
+rectangle "GitHub Graph Analyzer" {
+  usecase "UC01\nMinerar repositório" as UC01
+  usecase "UC02\nConstruir grafos G1–G4" as UC02
+  usecase "UC03\nAnalisar métricas" as UC03
+  usecase "UC04\nVisualizar grafo interativo" as UC04
+  usecase "UC05\nExportar GEXF" as UC05
+  usecase "UC06\nExportar PNG/DOT" as UC06
+  usecase "UC07\nConsultar centralidade\ne comunidades" as UC07
+  usecase "UC08\nDemonstrar API\ndo grafo (api_demo)" as UC08
+  usecase "UC09\nExecutar pipeline\nvia CLI" as UC09
+}
+
+User --> UC01
+User --> UC02
+User --> UC03
+User --> UC04
+User --> UC05
+User --> UC06
+User --> UC07
+User --> UC08
+User --> UC09
+
+UC01 --> GitHub : <<include>>\nREST API
+UC02 ..> UC01 : <<extend>>\nrequer CSVs
+UC03 ..> UC02 : <<extend>>\nrequer grafos
+UC04 ..> UC02 : <<extend>>\nrequer GEXF
+UC05 ..> UC02 : <<extend>>
+UC06 ..> UC04 : <<extend>>
+UC07 ..> UC03 : <<extend>>\nrequer relatórios
+UC09 ..> UC01
+UC09 ..> UC02
+UC09 ..> UC03
+
+note right of UC04
+  GrafoGen (frontend-grafogen)
+  Matheus Felipe — F5.5
+end note
+
+note bottom of UC01
+  Arthur Henrique — F1
+end note
+
+@enduml

@@ -1,0 +1,59 @@
+@startuml Implantacao
+skinparam nodeStyle rectangle
+
+title Diagrama de Implantação — Ambiente de Desenvolvimento / Demonstração
+
+node "Estação do Pesquisador" as Host {
+  node "Navegador Web" as Browser {
+    artifact "GrafoGen\nlocalhost:5173" as WebApp
+  }
+
+  node "Node.js Runtime" as Node {
+    artifact "Vite Dev Server\n:5173" as Vite
+    artifact "Express API\n:3001" as API
+  }
+
+  node "Python 3.10+" as Python {
+    artifact "src.app.main\n--mine | --build | --analyze" as Main
+    artifact "src.app.api_demo" as Demo
+    database "venv\n(requirements.txt)" as Venv
+  }
+
+  folder "Sistema de Arquivos" as Disk {
+    storage "github-graph-analyzer/\ndata/raw/" as Raw
+    storage "github-graph-analyzer/\noutput/graphs/" as Graphs
+    storage "github-graph-analyzer/\noutput/reports/" as Reports
+    storage ".env\n(GITHUB_TOKEN)" as Env
+  }
+}
+
+cloud "Internet" as Net {
+  node "api.github.com" as GitHub {
+    artifact "REST API v3\n(issues, PRs, reviews)" as Rest
+  }
+}
+
+Browser --> Vite : HTTP
+Browser --> API : HTTP /api/*\n(proxy Vite)
+Vite ..> API : proxy dev
+
+API --> Main : child_process.spawn\npython -m src.app.main
+Main --> Venv
+Main --> Env : lê token
+Main --> Raw : escreve (mine)
+Main --> Graphs : escreve (build)
+Main --> Reports : escreve (analyze)
+
+API --> Raw : leitura status
+API --> Graphs : serve .gexf
+API --> Reports : serve csv/json
+
+Main --> Rest : PyGithub\n(apenas --mine)
+Demo --> Graphs : gera demo .gexf
+
+note bottom of Host
+  Deploy típico: tudo local na máquina do desenvolvedor.
+  Produção acadêmica: mesma topologia em demo ao vivo.
+end note
+
+@enduml

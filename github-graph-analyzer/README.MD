@@ -4,6 +4,14 @@ Documento interno de desenvolvimento. Descreve **arquitetura**, **contratos entr
 
 > Para visão geral do projeto, consulte o [README principal](../README.md).
 
+### Documentação técnica
+
+| Documento | Conteúdo |
+|-----------|----------|
+| **[`Docs/DocumentacaoTecnica.md`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md)** | **Documento único** — F1–F5.5 (estudo do caso) |
+| [`Docs/diagramas/`](./Docs/diagramas/) | UML PlantUML |
+| [`Docs/README.md`](./Docs/README.md) | Índice da pasta Docs |
+
 ---
 
 ## 📂 Estrutura de Diretórios
@@ -39,7 +47,7 @@ src/
 │   ├── __init__.py
 │   ├── centrality.py                # Degree, Betweenness, Closeness, PageRank
 │   ├── structure.py                 # Densidade, Clustering, Assortatividade
-│   └── community.py                 # Louvain / Girvan-Newman, Bridging Ties
+│   └── community.py                 # Louvain, modularity, Bridging Ties
 │
 └── app/                             # 🤝 INTEGRAÇÃO
 ├── __init__.py
@@ -51,7 +59,7 @@ src/
 
 ## 🟦 Frente 1 — Mining (`src/mining/`)
 
-**Responsável:** [Nome A]  
+**Responsável:** Arthur Henrique  
 **Objetivo:** Coletar dados do repositório `github/spec-kit` e persistir em CSV padronizado.
 
 ### Módulos
@@ -91,17 +99,19 @@ carol,dave,review_pr,4,2026-01-16T09:11:00Z,87
 > ⚠️ Auto-interações (mesmo `src_login` e `dst_login`) **devem ser descartadas** (grafos sem laços).
 
 ### Tarefas
-- [ ] Configurar `GitHubClient` com `.env`
-- [ ] Implementar `IssueMiner.mine()` → lista de `Interaction`
-- [ ] Implementar `PRMiner.mine()` → lista de `Interaction`
-- [ ] Exportar para CSV
-- [ ] Testes com **mocks** da API (sem chamadas reais)
+- [x] Configurar `GitHubClient` com `.env`
+- [x] Implementar `IssueMiner.mine()` → lista de `Interaction`
+- [x] Implementar `PRMiner.mine()` → lista de `Interaction`
+- [x] Exportar para CSV
+- [x] Testes com **mocks** da API (sem chamadas reais)
+
+> Detalhes: [`Docs/DocumentacaoTecnica.md#parte-1--f1-mining`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md#parte-1--f1-mining)
 
 ---
 
 ## 🟩 Frente 2 — Graph Structures (`src/graph/`)
 
-**Responsável:** [Nome B]  
+**Responsável:** Matheus Felipe  
 **Objetivo:** Implementar **do zero** estruturas de grafo direcionado simples, com duas representações.
 
 ### 🚨 Restrições obrigatórias do enunciado
@@ -161,18 +171,20 @@ def export_to_gephi(self, path: str) -> None
 Formato `.gexf` (XML) escrito **manualmente**. Spec: <https://gephi.org/gexf/format/>
 
 ### Tarefas
-- [ ] Definir `exceptions.py`
-- [ ] Implementar `AbstractGraph` (ABC com validações compartilhadas)
-- [ ] Implementar `AdjacencyMatrixGraph` (matriz `numpy` ou lista de listas)
-- [ ] Implementar `AdjacencyListGraph` (dict de dicts ou lista de dicts)
-- [ ] Implementar `gephi_exporter` em XML
-- [ ] Testes unitários extensivos (idempotência, exceções, simetria, etc.)
+- [x] Definir `exceptions.py`
+- [x] Implementar `AbstractGraph` (ABC com validações compartilhadas)
+- [x] Implementar `AdjacencyMatrixGraph` (matriz `numpy`)
+- [x] Implementar `AdjacencyListGraph` (dict por vértice)
+- [x] Implementar `gephi_exporter` em XML (GEXF 1.3)
+- [x] Testes unitários extensivos (cobertura ~98% em `src/graph`)
+
+> Detalhes: [`Docs/DocumentacaoTecnica.md#parte-2--f2-graph-structures`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md#parte-2--f2-graph-structures)
 
 ---
 
 ## 🟨 Frente 3 — Builders (`src/builder/`)
 
-**Responsável:** [Nome C]  
+**Responsável:** Alice Shikida  
 **Objetivo:** Transformar os CSVs minerados (F1) em instâncias de grafo (F2).
 
 ### Módulos
@@ -204,17 +216,19 @@ CSVs gerados pela Frente 1 + schema documentado acima.
 Tupla `(graph: AbstractGraph, registry: UserRegistry)` — registry permite traduzir índices ↔ logins nos relatórios.
 
 ### Tarefas
-- [ ] `UserRegistry` com `add_user`, `get_index`, `get_login`
-- [ ] `BaseBuilder` com método template `build()`
-- [ ] 4 builders concretos
-- [ ] Exportação `.gexf` de cada grafo para `output/graphs/`
-- [ ] Testes com CSVs de exemplo
+- [x] `UserRegistry` com `add_user`, `get_index`, `get_login`
+- [x] `BaseBuilder` com método template `build()`
+- [x] 4 builders concretos (G1–G4)
+- [x] Exportação `.gexf` de cada grafo para `output/graphs/`
+- [x] Testes com CSVs de exemplo (cobertura ≥ 98% em `src/builder`)
+
+> Detalhes: [`Docs/DocumentacaoTecnica.md#parte-3--f3-builders`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md#parte-3--f3-builders)
 
 ---
 
 ## 🟥 Frente 4 — Analysis (`src/analysis/`)
 
-**Responsável:** [Nome D]  
+**Responsável:** Diogo Meireles  
 **Objetivo:** Implementar **do zero** as métricas e algoritmos de análise.
 
 ### Métricas
@@ -231,7 +245,7 @@ Tupla `(graph: AbstractGraph, registry: UserRegistry)` — registry permite trad
 - `degree_assortativity(graph)` — coeficiente de Pearson dos graus
 
 #### `community.py`
-- `detect_communities(graph)` — Louvain (recomendado) ou Girvan-Newman
+- `detect_communities(graph)` — algoritmo de Louvain
 - `modularity(graph, partition)` — fórmula de Newman
 - `bridging_ties(graph, partition)` — arestas inter-comunidade
 
@@ -244,17 +258,44 @@ Instância de `AbstractGraph` (qualquer implementação) + `UserRegistry`.
 - `output/reports/communities.csv`
 
 ### Tarefas
-- [ ] Implementar todas as métricas de centralidade
-- [ ] Implementar métricas estruturais
-- [ ] Implementar detecção de comunidades
-- [ ] Gerar relatórios em CSV/JSON
-- [ ] Testes com grafos de propriedades conhecidas (estrela, completo, ciclo)
+- [x] Implementar todas as métricas de centralidade
+- [x] Implementar métricas estruturais
+- [x] Implementar detecção de comunidades (Louvain)
+- [x] Gerar relatórios em CSV/JSON
+- [x] Testes com grafos de propriedades conhecidas (cobertura ≥ 98% em `src/analysis`)
+
+> Detalhes: [`Docs/DocumentacaoTecnica.md#parte-4--f4-analysis`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md#parte-4--f4-analysis)
 
 ---
 
-## 🤝 App / Integração (`src/app/`)
+## 🟪 Frente 5.5 — GrafoGen (`frontend-grafogen/`)
 
-**Responsável:** Frente 4 lidera, mas todos colaboram.
+**Responsável:** Matheus Felipe  
+**Objetivo:** Visualizador web interativo dos grafos G1–G4 e orquestração do pipeline Python.
+
+### Componentes
+
+| Pasta / arquivo | Responsabilidade |
+|-----------------|------------------|
+| `src/pages/` | Home (pipeline + cards) e Visualize (canvas) |
+| `server/index.js` | API Express: status, GEXF, relatórios, spawn `--mine`/`--build`/`--analyze` |
+| `src/utils/gexfParser.ts` | Converte GEXF 1.3 → Vis-Network |
+
+### Como rodar
+
+```bash
+cd frontend-grafogen
+npm install
+npm run dev
+```
+
+> Detalhes: [`Docs/DocumentacaoTecnica.md#parte-5--f5-integração-e-grafogen`](./Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md#parte-5--f5-integração-e-grafogen)
+
+---
+
+## 🤝 App / Integração (`src/app/`) — F5
+
+**Responsável:** Diogo Meireles
 
 ### `api_demo.py`
 > 🚨 **Exigência do enunciado:** "uma aplicação separada deve ser utilizada para consumir a API e demonstrar todas operações disponíveis."
@@ -336,22 +377,33 @@ pytest tests/test_analysis.py -v
 
 # Com cobertura
 pytest --cov=src tests/
+
+# GrafoGen (frontend)
+cd ../frontend-grafogen
+npm test
+npm run test:coverage
 ```
 
-**Meta de cobertura:** ≥ 80% por frente.
+**Meta de cobertura:** ≥ **98%** em `src/` (enforced via `pytest.ini`); GrafoGen ≥ **90%** em `frontend-grafogen/src/utils/`.
 
 ---
 
 ## ✅ Checklist de Definição de Pronto (DoD)
 
-Cada frente está "pronta" quando:
-- [ ] Código implementa todos os requisitos da seção
-- [ ] Testes unitários cobrem casos felizes E de erro
-- [ ] Cobertura ≥ 80%
-- [ ] Documentação (docstrings) completa
-- [ ] Code review feito por outro membro
-- [ ] Integrado em `dev` sem quebrar pipeline
-- [ ] Seção correspondente do relatório SBC redigida
+| Frente | Código | Testes | Cobertura | Doc técnica |
+|--------|--------|--------|-----------|-------------|
+| F1 Mining | ✅ | ✅ | ~100% | `Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md` |
+| F2 Graph | ✅ | ✅ | 100% | `Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md` |
+| F3 Builders | ✅ | ✅ | 100% | `Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md` |
+| F4 Analysis | ✅ | ✅ | ~100% | `Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md` |
+| F5 Integração | ✅ | ✅ | ~99% | `src/app/main.py` |
+| F5.5 GrafoGen | ✅ | ✅ | ≥90% `src/utils` | `Docs/DocumentaçãoTecnica/DocumentacaoTecnica.md` |
+
+Pendente para entrega final (F6):
+- [ ] Relatório SBC completo — **Alice Shikida**, **Matheus Felipe**
+- [ ] Vídeo de apresentação
+
+Diagramas UML: [`Docs/diagramas/`](./Docs/diagramas/)
 
 ---
 
